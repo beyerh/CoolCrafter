@@ -1,9 +1,10 @@
 import usb.core
 import usb.util
 import time
-import numpy
+import numpy as np
 import sys
 from erle import encode
+from typing import List, Optional, Union
 
 
 ##function that converts a number into a bit string of given length
@@ -276,8 +277,63 @@ class dmd():
             self.checkforerrors()
 
 
-    def defsequence(self,images,exp,ti,dt,to,rep):
+    def display_grayscale_image(self, image: np.ndarray, base_exposure_us: int = 200, color: str = '111', 
+                              trigger_in: bool = False, dark_time: int = 0, trigger_out: int = 0) -> None:
+        """
+        Display an 8-bit grayscale image on the DMD using bit-plane projection.
+        
+        This method converts an 8-bit grayscale image into 8 binary bit planes and displays them
+        sequentially with exponentially increasing exposure times to create the perception of grayscale.
+        
+        Args:
+            image: 2D numpy array of 8-bit grayscale values (0-255)
+            base_exposure_us: Base exposure time in microseconds for the LSB (least significant bit).
+                             Higher bits get exponentially longer exposure times.
+            color: Color channel selection ('111' for all RGB channels)
+            trigger_in: Whether to wait for an external trigger before displaying each bit plane
+            dark_time: Dark time in microseconds between bit planes
+            trigger_out: Trigger out configuration (0 = no trigger)
+        """
+        # Ensure image is 8-bit grayscale
+        if image.dtype != np.uint8:
+            image = image.astype(np.uint8)
+            
+        # Extract 8 bit planes (LSB first)
+        bit_planes = []
+        for i in range(8):
+            bit_planes.append(((image >> i) & 1).astype(np.uint8))
+        
+        # Prepare pattern parameters
+        num_patterns = 8
+        exposures = [base_exposure_us * (2 ** i) for i in range(num_patterns)]
+        trigger_ins = [trigger_in] * num_patterns
+        dark_times = [dark_time] * num_patterns
+        trigger_outs = [trigger_out] * num_patterns
+        
+        # Stop any running sequence
+        self.stopsequence()
+        
+        # Configure the sequence with all bit planes
+        self.defsequence(bit_planes, exposures, trigger_ins, dark_times, trigger_outs, 0)  # 0 = repeat indefinitely
+        
+        # Set to pattern on-the-fly mode
+        self.changemode(3)
+        
+        # Start the sequence
+        self.startsequence()
 
+    def defsequence(self, images, exp, ti, dt, to, rep):
+        """
+        Define a sequence of patterns to be displayed on the DMD.
+        
+        Args:
+            images: List of binary images (numpy arrays)
+            exp: List of exposure times in microseconds for each image
+            ti: List of trigger_in flags (True/False) for each image
+            dt: List of dark times in microseconds for each image
+            to: List of trigger_out configurations for each image
+            rep: Number of repetitions (0 = infinite)
+        """
         self.stopsequence()
 
         arr=[]
@@ -319,7 +375,6 @@ class dmd():
 
             print ('uploading...')
             self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
-
 
 
 
