@@ -58,29 +58,6 @@ def merge(images):
     return image32
 
 
-def merge_8bit(images):
-    '''
-    Convert 8-bit grayscale images to 24-bit format for DMD
-    For a single 8-bit grayscale image, replicate the value across R, G, B channels
-    Format: 0x00BBGGRR where RR=GG=BB=pixel_value for grayscale
-    
-    Note: Currently supports only 1 image at a time for 8-bit mode
-    '''
-    if len(images) != 1:
-        raise ValueError("8-bit mode currently supports only 1 image at a time")
-    
-    # Get the 8-bit grayscale image
-    img = images[0].astype(np.uint8)
-    
-    # Create 24-bit image with R=G=B=pixel_value
-    # Format: 0x00BBGGRR
-    image32 = img.astype(np.uint32)  # R channel
-    image32 += (img.astype(np.uint32) << 8)  # G channel
-    image32 += (img.astype(np.uint32) << 16)  # B channel
-    
-    return image32
-
-
 def bgr(pixel):
     '''
     convert an uint32 pixel into [B, G, R] bytes
@@ -164,36 +141,6 @@ def encode(images):
 
     # uint32 array, shape = (1080, 1920)
     image = merge(images)
-
-    # image content
-    for i in range(1080):
-        # bool array indicating if same as previous row, shape = (1920, )
-        same_prev = np.zeros(1920, dtype=bool) if i == 0 else image[i] == image[i-1]
-        encoded += encode_row(image[i], same_prev)
-
-    # end of image
-    encoded += b'\x00\x01\x00'
-
-    # pad to 4-byte boundary
-    encoded += bytearray((-len(encoded)) % 4)
-
-    # overwrite number of bytes in header
-    # uint32 little endian, offset=8
-    struct.pack_into('<I', encoded, 8, len(encoded))
-
-    return encoded, len(encoded)
-
-
-def encode_8bit(images):
-    '''
-    encode 8-bit grayscale image with the format described in section 2.4.3.2.1
-    Uses the same encoding as binary images but with 8-bit pixel values
-    '''
-    # header
-    encoded = bytearray(header_template)
-
-    # uint32 array, shape = (1080, 1920) with R=G=B for grayscale
-    image = merge_8bit(images)
 
     # image content
     for i in range(1080):
