@@ -1,6 +1,9 @@
 # Pycrafter6500 - Python Controller for TI DLP LightCrafter 6500
 
-A Python controller for Texas Instruments' DLPLCR6500EVM evaluation module for DLP technology. The controller can fully control the "pattern on-the-fly" mode with user-defined sequences of binary and grayscale images. Requires `pyusb` and `numpy`, with `PIL`/`pillow` recommended for image handling and testing.
+A Python controller for Texas Instruments' DLPLCR6500EVM evaluation module for DLP technology. The controller can fully control the "pattern on-the-fly" mode with user-defined sequences of binary and grayscale images. Requires `pyusb` and `numpy`, with `PIL`/`pillow` recommended for image handling and testing. The library is compatible with the [uPatternScope](https://doi.org/10.1038/s41467-024-54351-6) for intensity modulated light pattern projection in optogenetic microscope experiments.
+
+
+ using a microscope and intensity modulatied pattern projection.
 
 ## About This Fork
 
@@ -330,6 +333,7 @@ Images are encoded using Enhanced Run-Length Encoding (ERLE) as specified in the
 
 If you use this library for scientific publications, please cite:
 - Original work: https://doi.org/10.1364/OE.25.000949
+- uPatternScope: https://doi.org/10.1038/s41467-024-54351-6
 
 ## License
 
