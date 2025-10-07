@@ -26,6 +26,7 @@ This is a fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) wit
   - `numpy` - Array operations
   - `PIL/pillow` - Image loading and processing
   - `cv2` (optional) - Additional image processing
+  - `ttkthemes` - For the gui
 
 ### Driver Installation
 
@@ -41,7 +42,7 @@ This is a fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) wit
 
 ```bash
 # Install dependencies
-pip install pyusb numpy pillow opencv-python
+pip install pyusb numpy pillow opencv-python ttkthemes
 
 ## Quick Start
 
@@ -97,6 +98,44 @@ trigger_out = [1]
 
 dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0)
 dlp.startsequence()
+```
+
+## Graphical User Interface (GUI)
+
+A modern GUI application is included for easy control of the DMD without writing code.
+
+### Launching the GUI
+
+```bash
+python3 gui.py
+```
+
+### GUI Features
+
+- **Three Projection Modes**:
+  - **Sequence Mode**: Cycle through up to 24 x 1-bit images continuously
+  - **Constant Mode**: Project a single selected image (1-bit or 8-bit)
+  - **Pulsed Projection**: Alternate through images with individual timing control
+
+- **Image Management**:
+  - Add multiple images with preview
+  - Per-image settings (mode, exposure, dark time, duration)
+  - Drag-and-drop image reordering (select and manage)
+
+- **Flexible Timing**:
+  - Time units: seconds, minutes, or hours
+  - Bidirectional runtime/cycles calculation in pulsed mode
+  - Individual duration settings per image
+
+- **Demo Mode**: Test all features without hardware
+- **Modern Theme**: Professional arc theme using ttkthemes
+- **Progress Logging**: Full-width log with execution block separation
+
+### GUI Requirements
+
+The GUI requires one additional dependency:
+```bash
+pip install ttkthemes
 ```
 
 ## API Reference
