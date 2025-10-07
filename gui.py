@@ -27,9 +27,13 @@ class ImageItem:
         if img.size != (1920, 1080): img = img.resize((1920, 1080), Image.LANCZOS)
         img_array = np.array(img)
         self.image_array = img_array // 129 if self.mode == '1bit' else img_array.astype(np.uint8)
+        # Create thumbnail maintaining exact 16:9 aspect ratio (1920:1080)
         thumb = img.copy()
-        thumb.thumbnail((200, 113), Image.LANCZOS)
+        thumb.thumbnail((480, 270), Image.LANCZOS)
         self.thumbnail = ImageTk.PhotoImage(thumb)
+        # Also create mirrored version
+        thumb_mirrored = thumb.transpose(Image.FLIP_LEFT_RIGHT)
+        self.thumbnail_mirrored = ImageTk.PhotoImage(thumb_mirrored)
         return self.image_array
 
 class DMDControllerGUI:
@@ -159,6 +163,13 @@ class DMDControllerGUI:
         img_mgmt_frame.pack(fill=tk.X, pady=(0, 10))
         ttk.Button(img_mgmt_frame, text="Add Image(s)", command=self.add_images).pack(fill=tk.X, pady=2)
         ttk.Button(img_mgmt_frame, text="Remove Selected", command=self.remove_selected_image).pack(fill=tk.X, pady=2)
+        
+        # Reorder buttons in a horizontal frame
+        reorder_frame = ttk.Frame(img_mgmt_frame)
+        reorder_frame.pack(fill=tk.X, pady=2)
+        ttk.Button(reorder_frame, text="▲ Move Up", command=self.move_image_up).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        ttk.Button(reorder_frame, text="▼ Move Down", command=self.move_image_down).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
+        
         ttk.Button(img_mgmt_frame, text="Clear All", command=self.clear_all_images).pack(fill=tk.X, pady=2)
         
         global_frame = ttk.LabelFrame(left_frame, text="Global Settings", padding="5")
@@ -166,7 +177,10 @@ class DMDControllerGUI:
         ttk.Label(global_frame, text="Default Mode:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.default_mode_var = tk.StringVar(value='8bit')
         ttk.Combobox(global_frame, textvariable=self.default_mode_var, values=['1bit', '8bit'], state='readonly', width=12).grid(row=0, column=1, pady=2)
-        ttk.Button(global_frame, text="Apply to All", command=self.apply_default_mode).grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        ttk.Label(global_frame, text="Default Exposure (μs):").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.default_exposure_var = tk.StringVar(value='4046')
+        ttk.Entry(global_frame, textvariable=self.default_exposure_var, width=15).grid(row=1, column=1, pady=2)
+        ttk.Button(global_frame, text="Apply to All", command=self.apply_default_mode).grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
         
         # Center Panel
         center_frame = ttk.Frame(main_frame)
@@ -194,6 +208,9 @@ class DMDControllerGUI:
         self.image_tree.column('duration', width=90)
         self.image_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.image_tree.bind('<<TreeviewSelect>>', self.on_image_select)
+        # Keyboard shortcuts for reordering
+        self.image_tree.bind('<Control-Up>', lambda e: self.move_image_up())
+        self.image_tree.bind('<Control-Down>', lambda e: self.move_image_down())
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.image_tree.yview)
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
@@ -206,9 +223,18 @@ class DMDControllerGUI:
         
         preview_left = ttk.Frame(preview_frame)
         preview_left.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
-        ttk.Label(preview_left, text="Preview:").pack(anchor=tk.W)
-        self.preview_canvas = tk.Canvas(preview_left, width=400, height=225, bg='black')
-        self.preview_canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Preview header with mirror checkbox
+        preview_header = ttk.Frame(preview_left)
+        preview_header.pack(fill=tk.X, anchor=tk.W)
+        ttk.Label(preview_header, text="Preview (1920×1080):").pack(side=tk.LEFT)
+        self.mirror_preview_var = tk.BooleanVar(value=True)  # Default: mirrored
+        ttk.Checkbutton(preview_header, text="Mirror", variable=self.mirror_preview_var, command=self.refresh_preview).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Maintain 16:9 aspect ratio (1920:1080 = 16:9)
+        # Using width=480, height=270 for exact 16:9 ratio
+        self.preview_canvas = tk.Canvas(preview_left, width=480, height=270, bg='black', highlightthickness=1, highlightbackground='gray')
+        self.preview_canvas.pack(pady=5)
         self.preview_label = ttk.Label(preview_left, text="No image selected", foreground="gray")
         self.preview_label.pack(pady=5)
         
@@ -391,8 +417,13 @@ class DMDControllerGUI:
     def add_images(self):
         filepaths = filedialog.askopenfilenames(title="Select Images", filetypes=[("Images", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"), ("All", "*.*")])
         if not filepaths: return
+        try:
+            default_exposure = int(self.default_exposure_var.get())
+        except ValueError:
+            default_exposure = 4046  # Fallback
         for filepath in filepaths:
             img_item = ImageItem(filepath, self.default_mode_var.get())
+            img_item.exposure = default_exposure  # Apply global default exposure
             self.images.append(img_item)
             self.image_tree.insert('', tk.END, values=(os.path.basename(filepath), img_item.mode, img_item.exposure, img_item.dark_time, img_item.duration))
         self.update_sequence_info()
@@ -416,12 +447,62 @@ class DMDControllerGUI:
         self.clear_preview()
         self.update_sequence_info()
     
+    def move_image_up(self):
+        """Move selected image up in the list"""
+        sel = self.image_tree.selection()
+        if not sel: return
+        idx = self.image_tree.index(sel[0])
+        if idx == 0: return  # Already at top
+        
+        # Swap images in list
+        self.images[idx], self.images[idx-1] = self.images[idx-1], self.images[idx]
+        
+        # Refresh display
+        self.refresh_image_list()
+        
+        # Reselect the moved item at its new position
+        items = self.image_tree.get_children()
+        self.image_tree.selection_set(items[idx-1])
+        self.image_tree.focus(items[idx-1])
+        self.selected_image_index = idx - 1
+        
+        # Update pulsed mode calculations if in pulsed mode
+        if self.projection_mode.get() == 'pulsed':
+            self.calculate_cycles_from_runtime()
+    
+    def move_image_down(self):
+        """Move selected image down in the list"""
+        sel = self.image_tree.selection()
+        if not sel: return
+        idx = self.image_tree.index(sel[0])
+        if idx >= len(self.images) - 1: return  # Already at bottom
+        
+        # Swap images in list
+        self.images[idx], self.images[idx+1] = self.images[idx+1], self.images[idx]
+        
+        # Refresh display
+        self.refresh_image_list()
+        
+        # Reselect the moved item at its new position
+        items = self.image_tree.get_children()
+        self.image_tree.selection_set(items[idx+1])
+        self.image_tree.focus(items[idx+1])
+        self.selected_image_index = idx + 1
+        
+        # Update pulsed mode calculations if in pulsed mode
+        if self.projection_mode.get() == 'pulsed':
+            self.calculate_cycles_from_runtime()
+    
     def apply_default_mode(self):
         if not self.images: return
         mode = self.default_mode_var.get()
+        try:
+            exposure = int(self.default_exposure_var.get())
+        except ValueError:
+            exposure = 4046  # Fallback to default
         for img in self.images:
             img.mode = mode
-            img.exposure = 100000 if mode == '8bit' else 4046
+            img.exposure = exposure
         self.refresh_image_list()
     
     def on_image_select(self, event):
@@ -570,14 +651,40 @@ class DMDControllerGUI:
     def display_preview(self, img):
         if img.thumbnail:
             self.preview_canvas.delete("all")
-            w, h = (400, 225) if self.preview_canvas.winfo_width() <= 1 else (self.preview_canvas.winfo_width(), self.preview_canvas.winfo_height())
-            x, y = (w - img.thumbnail.width()) // 2, (h - img.thumbnail.height()) // 2
-            self.preview_canvas.create_image(x, y, anchor=tk.NW, image=img.thumbnail)
-            self.preview_label.config(text=f"{os.path.basename(img.filepath)} | {img.mode} | Range: {img.image_array.min()}-{img.image_array.max()}")
+            # Canvas is fixed at 480x270 to maintain exact 16:9 aspect ratio
+            canvas_w, canvas_h = 480, 270
+            # Use mirrored thumbnail if mirror option is enabled
+            thumb = img.thumbnail_mirrored if (self.mirror_preview_var.get() and hasattr(img, 'thumbnail_mirrored')) else img.thumbnail
+            x, y = (canvas_w - thumb.width()) // 2, (canvas_h - thumb.height()) // 2
+            self.preview_canvas.create_image(x, y, anchor=tk.NW, image=thumb)
+            self.preview_label.config(text=f"{os.path.basename(img.filepath)} | {img.mode} | Range: {img.image_array.min()}-{img.image_array.max()}", foreground="black")
+    
+    def update_preview_during_projection(self, img, status_text=""):
+        """Thread-safe method to update preview during projection"""
+        def _update():
+            if img.thumbnail:
+                self.preview_canvas.delete("all")
+                canvas_w, canvas_h = 480, 270
+                # Use mirrored thumbnail if mirror option is enabled
+                thumb = img.thumbnail_mirrored if (self.mirror_preview_var.get() and hasattr(img, 'thumbnail_mirrored')) else img.thumbnail
+                x, y = (canvas_w - thumb.width()) // 2, (canvas_h - thumb.height()) // 2
+                self.preview_canvas.create_image(x, y, anchor=tk.NW, image=thumb)
+                label_text = f"▶ {os.path.basename(img.filepath)} | {img.mode}"
+                if status_text:
+                    label_text += f" | {status_text}"
+                self.preview_label.config(text=label_text, foreground="green")
+        self.root.after(0, _update)
     
     def clear_preview(self):
         self.preview_canvas.delete("all")
-        self.preview_label.config(text="No image selected")
+        self.preview_label.config(text="No image selected", foreground="gray")
+    
+    def refresh_preview(self):
+        """Refresh preview when mirror setting changes"""
+        if self.selected_image_index is not None and self.selected_image_index < len(self.images):
+            img = self.images[self.selected_image_index]
+            if img.image_array is not None:
+                self.display_preview(img)
     
     def refresh_image_list(self):
         for item in self.image_tree.get_children(): self.image_tree.delete(item)
@@ -601,10 +708,9 @@ class DMDControllerGUI:
             self.progress_text.insert(tk.END, "\n")
         else:
             self.progress_text.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        # Ensure the latest message is always visible
-        self.progress_text.see("end-1c")  # Scroll to show the last character
         self.progress_text.config(state=tk.DISABLED)
-        self.root.update_idletasks()
+        # Ensure the latest message is always visible
+        self.progress_text.see(tk.END)
     
     def update_timer(self):
         """Update the projection timer display"""
@@ -737,9 +843,14 @@ class DMDControllerGUI:
             rep = int(self.seq_repeat_count_var.get()) if self.seq_repeat_count_var.get().isdigit() else 0
             
             if not bit1:
-                self.log_progress("Error: No 1-bit images found for sequence mode")
+                self.log_progress("Error: No 1-bit images found for sequence mode. Set Mode to 1-bit.")
                 self.root.after(0, self.stop_projection)
                 return
+            
+            # Ensure all images are loaded
+            for img in bit1:
+                if img.image_array is None:
+                    img.load_image()
             
             if self.demo_mode:
                 # Demo mode
@@ -757,6 +868,17 @@ class DMDControllerGUI:
                 self.dlp.defsequence([i.image_array for i in bit1], [i.exposure for i in bit1], [False]*len(bit1), [i.dark_time for i in bit1], [1]*len(bit1), rep)
                 self.dlp.startsequence()
                 self.log_progress("Sequence projection started")
+            
+            # Cycle through images in preview to visualize sequence
+            idx = 0
+            while self.projecting and not self.stop_projection_flag:
+                img = bit1[idx % len(bit1)]
+                self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)}")
+                # Calculate time to display based on exposure + dark time (in seconds)
+                display_time = (img.exposure + img.dark_time) / 1000000.0  # Convert μs to seconds
+                time.sleep(max(display_time, 0.05))  # Minimum 50ms for visibility
+                idx += 1
+                
         except Exception as e:
             self.log_progress(f"Error: {e}")
             self.root.after(0, self.stop_projection)
@@ -785,6 +907,9 @@ class DMDControllerGUI:
                     total_time = time_value
             
             self.log_progress("Starting constant projection..." if not self.demo_mode else "[DEMO] Starting constant projection simulation...")
+            
+            # Update preview to show the projected image
+            self.update_preview_during_projection(img, "Projecting...")
             
             filename = os.path.basename(img.filepath)
             
@@ -874,22 +999,41 @@ class DMDControllerGUI:
                 for idx, img in enumerate(self.images):
                     if self.stop_projection_flag: break
                     
+                    # Update preview to show current image
+                    self.update_preview_during_projection(img, f"Projecting for {img.duration}s")
+                    
                     filename = os.path.basename(img.filepath)
                     
                     if self.demo_mode:
-                        # Demo mode: simulate projection
+                        # Demo mode: simulate projection with full duration
                         self.log_progress(f"[DEMO] Projecting {filename} ({img.mode}) for {img.duration}s...")
-                        time.sleep(min(img.duration, 2))  # Speed up demo (max 2s per image)
+                        time.sleep(img.duration)  # Use full duration in demo mode
                     else:
-                        # Real hardware mode
+                        # Real hardware mode - measure actual time to compensate for setup overhead
                         self.log_progress(f"Projecting {filename} ({img.mode}) for {img.duration}s...")
+                        
+                        # Start timing before setup
+                        img_start_time = time.time()
+                        
+                        # Setup sequence (this takes time, especially for 8-bit)
                         if img.mode == '1bit':
                             self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
                         else:
                             self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
                         self.dlp.startsequence()
-                        time.sleep(img.duration)
+                        
+                        # Calculate remaining time after setup overhead
+                        setup_time = time.time() - img_start_time
+                        remaining_time = max(0, img.duration - setup_time)
+                        
+                        # Sleep for the remaining duration to achieve exact total time
+                        time.sleep(remaining_time)
                         self.dlp.stopsequence()
+                        
+                        # Log actual timing for debugging
+                        actual_duration = time.time() - img_start_time
+                        if abs(actual_duration - img.duration) > 0.5:  # Log if off by more than 0.5s
+                            self.log_progress(f"  Actual duration: {actual_duration:.1f}s (setup took {setup_time:.1f}s)")
                 
                 # Progress update
                 if c % 5 == 0 or c == cycles:  # Update every 5 cycles or at end

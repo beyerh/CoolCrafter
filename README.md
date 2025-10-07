@@ -1,13 +1,10 @@
-# Pycrafter6500 - Python Controller for TI DLP LightCrafter 6500
+# Pycrafter6500-8bit - Python Controller for TI DLP LightCrafter 6500
 
-A Python controller for Texas Instruments' DLPLCR6500EVM evaluation module for DLP technology. The controller can fully control the "pattern on-the-fly" mode with user-defined sequences of binary and grayscale images. Requires `pyusb` and `numpy`, with `PIL`/`pillow` recommended for image handling and testing. The library is compatible with the [uPatternScope](https://doi.org/10.1038/s41467-024-54351-6) for intensity modulated light pattern projection in optogenetic microscope experiments.
-
-
- using a microscope and intensity modulatied pattern projection.
+Python controller for Texas Instruments' DLPLCR6500EVM with 8-bit grayscale support. Controls pattern on-the-fly mode with binary and grayscale image sequences. Compatible with [uPatternScope](https://doi.org/10.1038/s41467-024-54351-6) for optogenetic microscopy.
 
 ## About This Fork
 
-This is a fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with 8-bit grayscaling support implemented. The implementation was developed using reference code from [uPatternScope](https://github.com/santkumar/uPatternScope) and assistance from Claude Sonnet 4.5.
+Fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with added 8-bit grayscale support, developed using reference code from [uPatternScope](https://github.com/santkumar/uPatternScope).
 
 ## Features
 
@@ -43,6 +40,19 @@ This is a fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) wit
 ```bash
 # Install dependencies
 pip install pyusb numpy pillow opencv-python ttkthemes
+```
+
+## Graphical User Interface
+
+Modern GUI for DMD control without coding. Launch with `python gui.py`.
+
+<img src="doc/screen.png" alt="GUI Screenshot" width="800"/>
+
+**Features:**
+- **Three projection modes**: Sequence (24×1-bit), Constant (single image), Pulsed (timed alternation)
+- **Image management**: Multi-select, reordering (Move Up/Down or Ctrl+Up/Down), live preview with mirror option
+- **Flexible timing**: Per-image exposure/dark time/duration with bidirectional calculations
+- **Demo mode**: Test without hardware
 
 ## Quick Start
 
@@ -100,289 +110,113 @@ dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0)
 dlp.startsequence()
 ```
 
-## Graphical User Interface (GUI)
-
-A modern GUI application is included for easy control of the DMD without writing code.
-
-### Launching the GUI
-
-```bash
-python3 gui.py
-```
-
-### GUI Features
-
-- **Three Projection Modes**:
-  - **Sequence Mode**: Cycle through up to 24 x 1-bit images continuously
-  - **Constant Mode**: Project a single selected image (1-bit or 8-bit)
-  - **Pulsed Projection**: Alternate through images with individual timing control
-
-- **Image Management**:
-  - Add multiple images with preview
-  - Per-image settings (mode, exposure, dark time, duration)
-  - Drag-and-drop image reordering (select and manage)
-
-- **Flexible Timing**:
-  - Time units: seconds, minutes, or hours
-  - Bidirectional runtime/cycles calculation in pulsed mode
-  - Individual duration settings per image
-
-- **Demo Mode**: Test all features without hardware
-- **Modern Theme**: Professional arc theme using ttkthemes
-- **Progress Logging**: Full-width log with execution block separation
-
-### GUI Requirements
-
-The GUI requires one additional dependency:
-```bash
-pip install ttkthemes
-```
-
 ## API Reference
 
 ### Core Methods
 
-#### `dmd()`
-Initialize connection to the DMD.
+```python
+dlp = pycrafter6500.dmd()                          # Initialize connection
+dlp.changemode(3)                                   # Set to pattern on-the-fly mode
 
-#### `changemode(mode)`
-Set DMD operating mode:
-- `0` - Normal video mode
-- `1` - Pre-stored pattern mode
-- `2` - Video pattern mode
-- `3` - Pattern on-the-fly mode (recommended)
+# 1-bit: Up to 24 images
+dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, repetitions)
 
-#### `defsequence(images, exposure, trigger_in, dark_time, trigger_out, repetitions)`
-Define a sequence for **1-bit binary** images.
+# 8-bit: 1 image at a time
+dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, repetitions)
+
+# Control
+dlp.startsequence() / dlp.pausesequence() / dlp.stopsequence()
+dlp.idle_on() / dlp.idle_off() / dlp.standby() / dlp.wakeup() / dlp.reset()
+```
 
 **Parameters:**
-- `images`: List of numpy arrays (1080×1920, dtype=uint8, values 0-1)
+- `images`: List of numpy arrays (1920×1080, uint8). Values: 0-1 (1-bit) or 0-255 (8-bit)
 - `exposure`: List of exposure times in microseconds
-- `trigger_in`: List of booleans for external trigger input
-- `dark_time`: List of dark times in microseconds
-- `trigger_out`: List of integers for trigger output
-- `repetitions`: Number of repetitions (0 = infinite)
-
-#### `defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, repetitions)`
-Define a sequence for **8-bit grayscale** images.
-
-**Parameters:**
-- `images`: List of numpy arrays (1080×1920, dtype=uint8, values 0-255)
-- Other parameters same as `defsequence()`
-
-**Note:** Currently supports 1 image at a time for 8-bit mode.
-
-#### Sequence Control
-
-```python
-dlp.startsequence()   # Start projection
-dlp.pausesequence()   # Pause projection
-dlp.stopsequence()    # Stop projection
-```
-
-#### Power Management
-
-```python
-dlp.idle_on()    # Enter idle mode
-dlp.idle_off()   # Exit idle mode
-dlp.standby()    # Enter standby
-dlp.wakeup()     # Wake from standby
-dlp.reset()      # Reset DMD
-```
+- `trigger_in/out`: External trigger configuration
+- `dark_time`: Dark periods between patterns (μs)
+- `repetitions`: Repeat count (0 = infinite)
 
 ## Folder Structure
 
 ```
-Pycrafter6500_pulsed/
-├── README.md                    # This file
-├── pycrafter6500.py            # Main library
-├── erle.py                     # Image encoding module
-├── license.txt                 # License information
-├── examples/                   # Example scripts
-│   ├── constant_projection.py
-│   └── pulsed_projection.py
-└── images/                     # Sample images
-    ├── image1.png
-    ├── image2.png
-    ├── hhu.tif
-    └── ...
+Pycrafter6500-8bit/
+├── gui.py                          # GUI application
+├── pycrafter6500.py               # Core DMD library
+├── erle.py                        # Image encoding (ERLE)
+├── generate_image_sequence.py     # Generate 24-frame test sequence
+├── examples/
+│   ├── constant_projection.py     # Single image projection
+│   └── pulsed_projection.py       # Timed alternating projection
+├── images/
+│   └── sequence/                  # Generated test patterns (24 frames)
+└── doc/
+    └── screen.png                 # GUI screenshot
 ```
 
 ## Example Scripts
 
-All example scripts are located in the `examples/` folder and can be run from anywhere in the repository.
-
-### 1. `constant_projection.py`
-Continuously project a single 8-bit grayscale image (uses `images/hhu.tif`).
-
-**Features:**
-- 8-bit grayscale projection
-- Infinite loop (press Ctrl+C to stop)
-- Automatic image resizing to DMD resolution
-
-**Usage:**
+### `constant_projection.py`
+Continuously project a single 8-bit grayscale image.
 ```bash
 python examples/constant_projection.py
 ```
 
-### 2. `pulsed_projection.py`
-Alternate between two images with configurable durations and modes. Perfect for timed experiments.
-
-**Features:**
-- Supports both 1-bit and 8-bit modes
-- Configurable duration for each image
-- Automatic cycle calculation based on total runtime
-- Progress tracking with elapsed and remaining time
-- Mixed mode support (e.g., 8-bit image1, 1-bit image2)
-
-**Configuration:**
-```python
-IMAGE1_PATH = os.path.join(script_dir, "..", "images", "image1.png")
-IMAGE2_PATH = os.path.join(script_dir, "..", "images", "image2.png")
-IMAGE1_DURATION_SEC = 29 * 60  # 29 minutes
-IMAGE2_DURATION_SEC = 1 * 60   # 1 minute
-TOTAL_RUNTIME_MIN = 24 * 60    # 24 hours
-
-IMAGE1_MODE = '8bit'  # or '1bit'
-IMAGE2_MODE = '1bit'  # or '8bit'
-```
-
-**Usage:**
+### `pulsed_projection.py`
+Alternate between two images with configurable timing. Edit script to configure durations and modes (1-bit or 8-bit).
 ```bash
 python examples/pulsed_projection.py
 ```
 
-**Example Output:**
-```
-============================================================
-Timed Alternating Image Projection (8-bit Support)
-============================================================
-Image 1: image1.png (8bit) - Duration: 1740 sec (29.0 min)
-Image 2: image2.png (1bit) - Duration: 60 sec (1.0 min)
-Cycle duration: 1800 sec (30.0 min)
-Total runtime: 1440 min (24.0 hours)
-Total cycles: 48
-============================================================
+### `generate_image_sequence.py`
+Generate 24-frame test sequence for Sequence Mode. Creates rotating patterns spanning full screen.
+```bash
+python generate_image_sequence.py
 ```
 
 ## 8-bit Grayscale: How It Works
 
-The DMD achieves 8-bit grayscale through **Binary Pulse Width Modulation (PWM)**:
-
-1. **Bit Plane Decomposition**: The 8-bit image is decomposed into 8 binary bit planes
-2. **Weighted Display**: Each bit plane is displayed with exposure time weighted by powers of 2:
-   - Bit 0 (LSB): 1× exposure
-   - Bit 1: 2× exposure
-   - Bit 2: 4× exposure
-   - ...
-   - Bit 7 (MSB): 128× exposure
-3. **Visual Integration**: The human eye integrates these rapid flashes to perceive grayscale
-
-### 1-bit vs 8-bit Comparison
+8-bit grayscale uses **Binary Pulse Width Modulation (PWM)**:
+1. Image decomposed into 8 binary bit planes
+2. Each plane displayed with weighted exposure (1×, 2×, 4×, ... 128×)
+3. Eye integrates rapid flashes to perceive 256 gray levels
 
 | Feature | 1-bit | 8-bit |
 |---------|-------|-------|
-| **Grayscale Levels** | 2 (black/white) | 256 |
-| **Pixel Values** | 0-1 | 0-255 |
-| **Display Method** | Single binary pattern | 8 bit planes with PWM |
-| **Typical Exposure** | ~4ms | ~100ms |
-| **Use Case** | Fast patterns, masks | Photos, gradients |
-| **Batch Support** | Up to 24 images | 1 image (current) |
+| **Levels** | 2 (black/white) | 256 |
+| **Values** | 0-1 | 0-255 |
+| **Exposure** | ~4ms | ~100ms |
+| **Batch** | Up to 24 images | 1 image |
 
 ## Image Requirements
 
-### Resolution
-- **Native DMD Resolution**: 1920 × 1080 pixels
-- Images are automatically resized if needed
-
-### Data Format
-- **1-bit**: `numpy.uint8` with values 0 or 1
-- **8-bit**: `numpy.uint8` with values 0-255
-- **Color**: Automatically converted to grayscale
-
-### Supported Formats
-- PNG, JPEG, TIFF, BMP, and other PIL-supported formats
+- **Resolution**: 1920×1080 (auto-resized)
+- **Format**: PNG, JPEG, TIFF, BMP (PIL-supported)
+- **Data**: numpy.uint8 arrays (0-1 for 1-bit, 0-255 for 8-bit)
 
 ## Troubleshooting
 
-### DMD Not Detected
-- Ensure USB cable is connected
-- Check that libusb drivers are installed (Windows)
-- Verify device appears in Device Manager / lsusb
-
-### Image Too Bright/Dark
-- **1-bit**: Adjust threshold when converting (default: `//129`)
-- **8-bit**: Adjust `exposure` parameter in microseconds
-
-### "8-bit mode currently supports only 1 image at a time"
-- Pass a list with exactly one image: `images = [img_array]`
-- For multiple images, call `defsequence_8bit()` separately for each
-
-### Image Has Artifacts
-- Ensure image is properly resized to 1920×1080
-- Check that dtype is `uint8`
-- Verify pixel values are in correct range (0-1 for 1-bit, 0-255 for 8-bit)
-
-### Slow Performance
-- The ERLE encoder provides significant speedup
-- Reduce image count or use lower resolution for testing
-- Ensure USB connection is stable
+- **DMD not detected**: Check USB connection and drivers (Windows: use Zadig)
+- **Image brightness**: Adjust exposure time (μs) or conversion threshold
+- **8-bit batch error**: Use list with 1 image: `images = [img_array]`
+- **Artifacts**: Verify 1920×1080 resolution and correct value range
 
 ## Technical Details
 
-### Modified Files
+- **USB**: HID protocol (VID: 0x0451, PID: 0xc900)
+- **Encoding**: Enhanced Run-Length Encoding (ERLE) per DLPC900 spec
+- **Modified files**: `pycrafter6500.py` (8-bit support), `erle.py` (merge_8bit/encode_8bit)
 
-**`pycrafter6500.py`**
-- Core DMD controller class
-- `defsequence()` for 1-bit images
-- `defsequence_8bit()` for 8-bit images
+## Credits
 
-**`erle.py`**
-- Enhanced Run-Length Encoding for image compression, modified in this fork with the merge_8bit() and encode_8bit() functions
-- `encode()` for 1-bit binary images
-- `encode_8bit()` for 8-bit grayscale images
-- `merge()` and `merge_8bit()` for image merging
-
-### USB Communication
-- Uses HID protocol over USB
-- Vendor ID: `0x0451`
-- Product ID: `0xc900`
-- Buffer size: 64 bytes
-
-### Image Encoding
-Images are encoded using Enhanced Run-Length Encoding (ERLE) as specified in the DLPC900 Programmer's Guide:
-- Header: 52 bytes (signature, dimensions, compression type)
-- Compression: Type 0x02 (Enhanced RLE)
-- Format: 24-bit BGR (0x00BBGGRR)
-
-## Credits and Citations
-
-**Original Library**: Pycrafter6500  
-**8-bit Support**: Extended implementation based on MATLAB DMD driver
-
-**Contributors:**
-- Guangyuan Zhao - Python 3.x compatibility
-- Ashu (@e841018) - Fast ERLE encoder
-
-**References:**
-- [DLPC900 Programmer's Guide](http://www.ti.com/lit/ug/dlpu018b/dlpu018b.pdf)
-- [Enhanced Run-Length Encoding (ERLE)](https://github.com/e841018/ERLE)
-
-### Scientific Usage
-
-If you use this library for scientific publications, please cite:
-- Original work: https://doi.org/10.1364/OE.25.000949
-- uPatternScope: https://doi.org/10.1038/s41467-024-54351-6
+- **Original**: [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) | [DOI: 10.1364/OE.25.000949](https://doi.org/10.1364/OE.25.000949)
+- **8-bit reference**: [uPatternScope](https://github.com/santkumar/uPatternScope) | [DOI: 10.1038/s41467-024-54351-6](https://doi.org/10.1038/s41467-024-54351-6)
+- **Contributors**: Guangyuan Zhao (Python 3.x), Ashu (@e841018) - [ERLE encoder](https://github.com/e841018/ERLE)
+- **Documentation**: [DLPC900 Programmer's Guide](http://www.ti.com/lit/ug/dlpu018b/dlpu018b.pdf)
 
 ## License
 
-See `license.txt` for details.
-
-## Support
-
-For issues, questions, or contributions, please open an issue on the repository.
+See `license.txt`
 
 ---
 
-**Version**: 1.1 (with 8-bit grayscale support)  
-**Last Updated**: October 2025
+**Version**: 1.1 (8-bit grayscale support) | October 2025
