@@ -7,129 +7,11 @@ from ttkthemes import ThemedTk
 from PIL import Image, ImageTk
 import numpy as np
 import os, threading, time
-import serial
-import serial.tools.list_ports
-import glob
-import sys
 import pycrafter6500
 
 # DLPC900 Pattern On-The-Fly hardware limits
 MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds - may work but test your hardware
 MAX_RECOMMENDED_EXPOSURE_US = 3000000  # 3 seconds - confirmed safe
-
-# CoolLED Wavelength Configuration (Channel -> Available Wavelengths)
-CHANNEL_WAVELENGTHS = {
-    'A': [365, 385, 395, 405],  # UV range
-    'B': [425, 445, 460, 470],  # Blue range
-    'C': [500, 525, 550, 575],  # Green/Yellow range
-    'D': [635, 660, 740, 770]   # Red/NIR range
-}
-
-class CoolLEDController:
-    """Serial communication handler for CoolLED pE-4000"""
-    
-    def __init__(self, port):
-        self.port = port
-        self.serial = None
-        self.connected = False
-        
-    def connect(self):
-        """Establish serial connection"""
-        try:
-            for baud in [57600, 38400]:
-                try:
-                    self.serial = serial.Serial(self.port, baud, timeout=0.5)
-                    time.sleep(0.1)
-                    version = self.get_version()
-                    if version:
-                        self.connected = True
-                        return True, f"{version} @ {baud} baud"
-                    self.serial.close()
-                except:
-                    if self.serial:
-                        self.serial.close()
-                    continue
-            return False, "No response from device"
-        except Exception as e:
-            return False, str(e)
-    
-    def disconnect(self):
-        """Close serial connection"""
-        if self.serial:
-            self.all_off()
-            self.serial.close()
-            self.serial = None
-        self.connected = False
-    
-    def send_command(self, command):
-        """Send command and return response"""
-        if not self.serial or not self.connected:
-            return None
-        try:
-            self.serial.write(f"{command}\r".encode('utf-8'))
-            time.sleep(0.05)
-            response = self.serial.readline().decode('utf-8').strip()
-            return response
-        except Exception as e:
-            print(f"CoolLED command error: {e}")
-            return None
-    
-    def get_version(self):
-        """Query firmware version"""
-        return self.send_command("XVER")
-    
-    def load_wavelength(self, wavelength_nm):
-        """Load a wavelength (automatically selects correct channel)"""
-        response = self.send_command(f"LOAD:{wavelength_nm}")
-        return response
-    
-    def set_intensity(self, channel, intensity):
-        """Set channel intensity and turn ON (0-100%)"""
-        intensity_str = f"{int(intensity):03d}"
-        response = self.send_command(f"CSS{channel}SN{intensity_str}")
-        return True
-    
-    def turn_off(self, channel):
-        """Turn channel OFF"""
-        response = self.send_command(f"CSS{channel}SF")
-        return True
-    
-    def all_off(self):
-        """Turn all channels OFF"""
-        response = self.send_command("CSF")
-        return True
-    
-    @staticmethod
-    def find_devices():
-        """Find connected CoolLED devices"""
-        devices = []
-        if sys.platform.startswith('win'):
-            ports = [f'COM{i+1}' for i in range(20)]
-        elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
-            ports = glob.glob('/dev/tty[A-Za-z]*')
-        elif sys.platform.startswith('darwin'):
-            ports = glob.glob('/dev/tty.*')
-        else:
-            return devices
-        
-        for port in ports:
-            try:
-                ser = serial.Serial(port, 38400, timeout=0.5)
-                time.sleep(0.1)
-                initial = ser.readline()
-                if b'CoolLED' in initial:
-                    devices.append(port)
-                    ser.close()
-                    continue
-                ser.write(b'XVER\n')
-                time.sleep(0.1)
-                response = ser.read(200)
-                if b'XFW_VER' in response or b'XUNIT' in response:
-                    devices.append(port)
-                ser.close()
-            except (OSError, serial.SerialException):
-                pass
-        return devices
 
 class ImageItem:
     def __init__(self, filepath, mode='1bit'):
@@ -144,11 +26,6 @@ class ImageItem:
         self.thumbnail = None
         self.thumbnail_mirrored = None
         self._pil_image = None  # Cache PIL image for faster reloading
-        # CoolLED illumination settings
-        self.led_enabled = False
-        self.led_channel = 'A'
-        self.led_wavelength = 365
-        self.led_intensity = 50
     
     def load_image(self, force_reload=False):
         """Load full image array. Only loads once unless force_reload=True"""
@@ -199,10 +76,6 @@ class DMDControllerGUI:
         self.projection_thread = None
         self.stop_projection_flag = False
         self.images = []
-        # CoolLED controller
-        self.coolled = None
-        self.coolled_connected = False
-        self.coolled_demo_mode = False
         self.selected_image_index = None
         self.projection_mode = tk.StringVar(value='constant')
         self.projection_start_time = None
@@ -239,8 +112,7 @@ class DMDControllerGUI:
         left_frame = ttk.LabelFrame(main_frame, text="System & Configuration", padding="10")
         left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
-        # DMD Connection
-        conn_frame = ttk.LabelFrame(left_frame, text="DMD Connection", padding="5")
+        conn_frame = ttk.LabelFrame(left_frame, text="Connection", padding="5")
         conn_frame.pack(fill=tk.X, pady=(0, 10))
         self.status_label = ttk.Label(conn_frame, text="● Disconnected", foreground="red")
         self.status_label.pack(anchor=tk.W)
@@ -250,19 +122,6 @@ class DMDControllerGUI:
         self.connect_btn.pack(side=tk.LEFT, padx=(0, 5))
         self.disconnect_btn = ttk.Button(btn_frame, text="Disconnect", command=self.disconnect_dmd, state=tk.DISABLED)
         self.disconnect_btn.pack(side=tk.LEFT)
-        
-        # CoolLED Connection
-        led_frame = ttk.LabelFrame(left_frame, text="CoolLED pE-4000", padding="5")
-        led_frame.pack(fill=tk.X, pady=(0, 10))
-        self.led_status_label = ttk.Label(led_frame, text="● Disconnected", foreground="red")
-        self.led_status_label.pack(anchor=tk.W)
-        led_btn_frame = ttk.Frame(led_frame)
-        led_btn_frame.pack(fill=tk.X, pady=(5, 0))
-        self.led_connect_btn = ttk.Button(led_btn_frame, text="Connect", command=self.connect_coolled)
-        self.led_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.led_disconnect_btn = ttk.Button(led_btn_frame, text="Disconnect", command=self.disconnect_coolled, state=tk.DISABLED)
-        self.led_disconnect_btn.pack(side=tk.LEFT)
-        ttk.Label(led_frame, text="For pulsed mode illumination", font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(5, 0))
         
         mode_frame = ttk.LabelFrame(left_frame, text="Projection Mode", padding="5")
         mode_frame.pack(fill=tk.X, pady=(0, 10))
@@ -360,20 +219,18 @@ class DMDControllerGUI:
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
         
-        columns = ('filename', 'mode', 'exposure', 'dark_time', 'duration', 'led')
+        columns = ('filename', 'mode', 'exposure', 'dark_time', 'duration')
         self.image_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=8)
         self.image_tree.heading('filename', text='Filename')
         self.image_tree.heading('mode', text='Mode')
         self.image_tree.heading('exposure', text='Exposure (μs)')
         self.image_tree.heading('dark_time', text='Dark Time (μs)')
         self.image_tree.heading('duration', text='Duration (s)')
-        self.image_tree.heading('led', text='LED')
-        self.image_tree.column('filename', width=200)
-        self.image_tree.column('mode', width=50)
-        self.image_tree.column('exposure', width=90)
-        self.image_tree.column('dark_time', width=90)
-        self.image_tree.column('duration', width=80)
-        self.image_tree.column('led', width=120)
+        self.image_tree.column('filename', width=250)
+        self.image_tree.column('mode', width=60)
+        self.image_tree.column('exposure', width=100)
+        self.image_tree.column('dark_time', width=100)
+        self.image_tree.column('duration', width=90)
         self.image_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.image_tree.bind('<<TreeviewSelect>>', self.on_image_select)
         # Keyboard shortcuts for reordering
@@ -439,34 +296,6 @@ class DMDControllerGUI:
         self.img_duration_var.trace('w', lambda *args: self.on_image_setting_change())
         self.img_duration_unit_var.trace('w', lambda *args: self.on_image_setting_change())
         ttk.Label(settings_inner, text="(For pulsed mode only)", font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W)
-        
-        # CoolLED Illumination Settings
-        ttk.Separator(settings_inner, orient=tk.HORIZONTAL).grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
-        ttk.Label(settings_inner, text="LED Illumination:", font=('TkDefaultFont', 9, 'bold')).grid(row=6, column=0, columnspan=2, sticky=tk.W)
-        
-        self.img_led_enabled_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(settings_inner, text="Enable LED", variable=self.img_led_enabled_var, command=self.on_image_setting_change).grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=5)
-        
-        ttk.Label(settings_inner, text="Channel:").grid(row=8, column=0, sticky=tk.W, pady=5)
-        self.img_led_channel_var = tk.StringVar(value='A')
-        led_channel_combo = ttk.Combobox(settings_inner, textvariable=self.img_led_channel_var, values=['A', 'B', 'C', 'D'], state='readonly', width=15)
-        led_channel_combo.grid(row=8, column=1, sticky=tk.W, pady=5, padx=(5, 0))
-        led_channel_combo.bind('<<ComboboxSelected>>', lambda e: self.on_led_channel_change())
-        
-        ttk.Label(settings_inner, text="Wavelength (nm):").grid(row=9, column=0, sticky=tk.W, pady=5)
-        self.img_led_wavelength_var = tk.StringVar()
-        self.led_wavelength_combo = ttk.Combobox(settings_inner, textvariable=self.img_led_wavelength_var, values=[str(w) for w in CHANNEL_WAVELENGTHS['A']], state='readonly', width=15)
-        self.led_wavelength_combo.grid(row=9, column=1, sticky=tk.W, pady=5, padx=(5, 0))
-        self.led_wavelength_combo.bind('<<ComboboxSelected>>', self.on_image_setting_change)
-        
-        ttk.Label(settings_inner, text="Intensity (%):").grid(row=10, column=0, sticky=tk.W, pady=5)
-        self.img_led_intensity_var = tk.StringVar(value='50')
-        ttk.Entry(settings_inner, textvariable=self.img_led_intensity_var, width=18).grid(row=10, column=1, sticky=tk.W, pady=5, padx=(5, 0))
-        self.img_led_intensity_var.trace('w', lambda *args: self.on_image_setting_change())
-        
-        self.led_mode_hint_label = ttk.Label(settings_inner, text="", font=('TkDefaultFont', 8), foreground='gray', wraplength=200)
-        self.led_mode_hint_label.grid(row=11, column=0, columnspan=2, sticky=tk.W)
-        self.update_led_hint_label()
         
         # Right Panel
         right_frame = ttk.LabelFrame(main_frame, text="Projection Control", padding="10")
@@ -534,12 +363,6 @@ class DMDControllerGUI:
                 self.disconnect_dmd()
             except:
                 pass
-        # Disconnect CoolLED if connected
-        if self.coolled_connected and not self.coolled_demo_mode:
-            try:
-                self.disconnect_coolled()
-            except:
-                pass
         # Close the window
         self.root.destroy()
     
@@ -589,68 +412,6 @@ class DMDControllerGUI:
         self.disconnect_btn.config(state=tk.DISABLED)
         self.start_btn.config(state=tk.DISABLED)
         self.log_progress("Disconnected")
-    
-    def connect_coolled(self):
-        """Connect to CoolLED pE-4000"""
-        def search_and_connect():
-            devices = CoolLEDController.find_devices()
-            self.root.after(0, lambda: self.complete_coolled_connection(devices))
-        threading.Thread(target=search_and_connect, daemon=True).start()
-    
-    def complete_coolled_connection(self, devices):
-        """Complete CoolLED connection after device search"""
-        if not devices:
-            result = messagebox.askyesno(
-                "CoolLED Not Found",
-                "Could not find CoolLED pE-4000 device.\n\n"
-                "Would you like to enable Demo Mode for CoolLED?\n\n"
-                "Demo Mode lets you configure LED settings without hardware."
-            )
-            if result:
-                self.enable_coolled_demo_mode()
-            return
-        
-        port = devices[0]
-        self.coolled = CoolLEDController(port)
-        success, message = self.coolled.connect()
-        
-        if success:
-            self.coolled_connected = True
-            self.led_status_label.config(text="● Connected", foreground="green")
-            self.led_connect_btn.config(state=tk.DISABLED)
-            self.led_disconnect_btn.config(state=tk.NORMAL)
-            self.log_progress(f"CoolLED connected: {message}")
-            self.update_led_hint_label()
-        else:
-            messagebox.showerror("Connection Error", f"Could not connect to CoolLED:\n{message}")
-    
-    def disconnect_coolled(self):
-        """Disconnect from CoolLED"""
-        if self.coolled and self.coolled_connected:
-            self.coolled.disconnect()
-        self.coolled = None
-        self.coolled_connected = False
-        self.coolled_demo_mode = False
-        self.led_status_label.config(text="● Disconnected", foreground="red")
-        self.led_connect_btn.config(state=tk.NORMAL)
-        self.led_disconnect_btn.config(state=tk.DISABLED)
-        self.log_progress("CoolLED disconnected")
-        self.update_led_hint_label()
-    
-    def enable_coolled_demo_mode(self):
-        """Enable demo mode for CoolLED"""
-        self.coolled_demo_mode = True
-        self.coolled_connected = True
-        self.led_status_label.config(text="● Demo Mode", foreground="orange")
-        self.led_connect_btn.config(state=tk.DISABLED)
-        self.led_disconnect_btn.config(state=tk.NORMAL)
-        self.log_progress("CoolLED Demo Mode enabled")
-        messagebox.showinfo(
-            "CoolLED Demo Mode",
-            "CoolLED Demo Mode is now active!\n\n"
-            "You can configure LED settings for images.\n"
-            "Note: No actual LED control will occur."
-        )
     
     def enable_demo_mode(self):
         """Enable demo mode for testing without hardware"""
@@ -709,9 +470,6 @@ class DMDControllerGUI:
         
         # Update duration field state based on mode
         self.update_duration_field_state()
-        
-        # Update LED hint label
-        self.update_led_hint_label()
         
         self.update_sequence_info()
     
@@ -809,32 +567,6 @@ class DMDControllerGUI:
             img.exposure = exposure
         self.refresh_image_list()
     
-    def on_led_channel_change(self):
-        """Update wavelength options when channel changes (per-image settings)"""
-        channel = self.img_led_channel_var.get()
-        wavelengths = CHANNEL_WAVELENGTHS[channel]
-        self.led_wavelength_combo['values'] = [str(w) for w in wavelengths]
-        # Set to first wavelength in the new channel
-        self.img_led_wavelength_var.set(str(wavelengths[0]))
-        self.on_image_setting_change()
-    
-    def update_led_hint_label(self):
-        """Update the LED hint label based on projection mode"""
-        mode = self.projection_mode.get()
-        if mode == 'constant':
-            hint = "Used for constant projection"
-            color = 'gray'
-        elif mode == 'sequence':
-            hint = "First image's settings used\nfor entire sequence"
-            color = 'red'
-        elif mode == 'pulsed':
-            hint = "Per-image control\n(on/off each image)"
-            color = 'gray'
-        else:
-            hint = ""
-            color = 'gray'
-        self.led_mode_hint_label.config(text=hint, foreground=color)
-    
     def on_image_select(self, event):
         sel = self.image_tree.selection()
         if not sel: return
@@ -860,14 +592,6 @@ class DMDControllerGUI:
         else:  # sec
             duration_display = img.duration
         self.img_duration_var.set(f"{duration_display:.1f}" if duration_display != int(duration_display) else str(int(duration_display)))
-        
-        # Load LED settings
-        self.img_led_enabled_var.set(img.led_enabled)
-        self.img_led_channel_var.set(img.led_channel)
-        self.img_led_wavelength_var.set(str(img.led_wavelength))
-        self.img_led_intensity_var.set(str(img.led_intensity))
-        # Update wavelength options for the current channel
-        self.led_wavelength_combo['values'] = [str(w) for w in CHANNEL_WAVELENGTHS[img.led_channel]]
         
         # Re-enable trace callbacks
         self._loading_image = False
@@ -908,15 +632,6 @@ class DMDControllerGUI:
                 img.duration = int(duration_value)
             # Store the unit preference with the image
             img.duration_unit = unit
-            
-            # Update LED settings
-            img.led_enabled = self.img_led_enabled_var.get()
-            img.led_channel = self.img_led_channel_var.get()
-            if self.img_led_wavelength_var.get():
-                img.led_wavelength = int(self.img_led_wavelength_var.get())
-            if self.img_led_intensity_var.get():
-                img.led_intensity = int(self.img_led_intensity_var.get())
-            
             # Fix numpy array boolean check
             if img.image_array is not None:
                 img.load_image()
@@ -1062,12 +777,7 @@ class DMDControllerGUI:
     def refresh_image_list(self):
         for item in self.image_tree.get_children(): self.image_tree.delete(item)
         for img in self.images:
-            # Format LED info column
-            if img.led_enabled:
-                led_info = f"Ch{img.led_channel} {img.led_wavelength}nm {img.led_intensity}%"
-            else:
-                led_info = "-"
-            self.image_tree.insert('', tk.END, values=(os.path.basename(img.filepath), img.mode, img.exposure, img.dark_time, img.duration, led_info))
+            self.image_tree.insert('', tk.END, values=(os.path.basename(img.filepath), img.mode, img.exposure, img.dark_time, img.duration))
         self.update_sequence_info()
     
     def update_sequence_info(self):
@@ -1234,15 +944,6 @@ class DMDControllerGUI:
         self.stop_projection_flag = True
         if self.dlp and not self.demo_mode:
             self.dlp.stopsequence()
-        
-        # Turn off all CoolLED channels if connected
-        if self.coolled_connected and not self.coolled_demo_mode:
-            try:
-                self.coolled.all_off()
-                self.log_progress("LED: All channels OFF")
-            except Exception as e:
-                self.log_progress(f"Warning: Could not turn off LED: {e}")
-        
         self.projecting = False
         
         # Stop timer updates
@@ -1284,27 +985,6 @@ class DMDControllerGUI:
             if not self.demo_mode and not self.validate_exposure_times(bit1):
                 self.root.after(0, self.stop_projection)
                 return
-            
-            # Check and activate LED using first image's settings
-            first_img = bit1[0]
-            if first_img.led_enabled and self.coolled_connected:
-                try:
-                    channel = first_img.led_channel
-                    wavelength = first_img.led_wavelength
-                    intensity = first_img.led_intensity
-                    
-                    if not self.coolled_demo_mode:
-                        self.coolled.load_wavelength(wavelength)
-                        self.coolled.set_intensity(channel, intensity)
-                        self.log_progress(f"LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                    else:
-                        self.log_progress(f"[DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                except Exception as e:
-                    self.log_progress(f"Warning: LED control failed: {e}")
-            elif first_img.led_enabled and not self.coolled_connected:
-                self.log_progress("⚠ Warning: LED enabled but CoolLED not connected")
-            else:
-                self.log_progress("LED: OFF (not enabled)")
             
             if self.demo_mode:
                 # Demo mode
@@ -1383,26 +1063,6 @@ class DMDControllerGUI:
             if not self.demo_mode and not self.validate_exposure_times([img]):
                 self.root.after(0, self.stop_projection)
                 return
-            
-            # Check and activate LED using selected image's settings
-            if img.led_enabled and self.coolled_connected:
-                try:
-                    channel = img.led_channel
-                    wavelength = img.led_wavelength
-                    intensity = img.led_intensity
-                    
-                    if not self.coolled_demo_mode:
-                        self.coolled.load_wavelength(wavelength)
-                        self.coolled.set_intensity(channel, intensity)
-                        self.log_progress(f"LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                    else:
-                        self.log_progress(f"[DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                except Exception as e:
-                    self.log_progress(f"Warning: LED control failed: {e}")
-            elif img.led_enabled and not self.coolled_connected:
-                self.log_progress("⚠ Warning: LED enabled but CoolLED not connected")
-            else:
-                self.log_progress("LED: OFF (not enabled)")
             
             # Update preview to show the projected image
             self.update_preview_during_projection(img, "Projecting...")
@@ -1485,14 +1145,6 @@ class DMDControllerGUI:
             self.log_progress("Starting pulsed projection..." if not self.demo_mode else "[DEMO] Starting pulsed projection simulation...")
             self.log_progress(f"Total cycles: {cycles}, Cycle duration: {cycle_dur}s")
             
-            # Check if any images have LED enabled
-            led_images = [img for img in self.images if img.led_enabled]
-            if led_images:
-                if self.coolled_connected:
-                    self.log_progress(f"CoolLED control enabled for {len(led_images)} image(s)" + (" [DEMO]" if self.coolled_demo_mode else ""))
-                else:
-                    self.log_progress("⚠ Warning: Some images have LED enabled but CoolLED not connected")
-            
             start_time = time.time()
             
             for c in range(1, cycles + 1):
@@ -1504,24 +1156,9 @@ class DMDControllerGUI:
                     if self.stop_projection_flag: break
                     
                     # Update preview to show current image
-                    led_status = f"LED: {img.led_channel} {img.led_wavelength}nm {img.led_intensity}%" if img.led_enabled else ""
-                    preview_text = f"{img.duration}s | {led_status}" if led_status else f"{img.duration}s"
-                    self.update_preview_during_projection(img, preview_text)
+                    self.update_preview_during_projection(img, f"Projecting for {img.duration}s")
                     
                     filename = os.path.basename(img.filepath)
-                    
-                    # Control CoolLED if enabled for this image
-                    if img.led_enabled and self.coolled_connected:
-                        if not self.coolled_demo_mode:
-                            # Real CoolLED hardware
-                            self.coolled.load_wavelength(img.led_wavelength)
-                            self.coolled.set_intensity(img.led_channel, img.led_intensity)
-                            self.log_progress(f"  LED: Ch{img.led_channel} {img.led_wavelength}nm @ {img.led_intensity}% - ON")
-                        else:
-                            # CoolLED demo mode
-                            self.log_progress(f"  [DEMO] LED: Ch{img.led_channel} {img.led_wavelength}nm @ {img.led_intensity}% - ON")
-                    elif img.led_enabled and not self.coolled_connected:
-                        self.log_progress(f"  ⚠ LED enabled but not connected")
                     
                     if self.demo_mode:
                         # Demo mode: simulate projection with full duration
@@ -1531,7 +1168,7 @@ class DMDControllerGUI:
                         # Real hardware mode
                         self.log_progress(f"Projecting {filename} ({img.mode}) for {img.duration}s...")
                         
-                        # Setup DMD sequence
+                        # Setup sequence
                         if img.mode == '1bit':
                             self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
                         else:
@@ -1541,11 +1178,6 @@ class DMDControllerGUI:
                         # Sleep for the projection duration
                         time.sleep(img.duration)
                         self.dlp.stopsequence()
-                    
-                    # Turn off CoolLED after projection if it was enabled
-                    if img.led_enabled and self.coolled_connected and not self.coolled_demo_mode:
-                        self.coolled.turn_off(img.led_channel)
-                        self.log_progress(f"  LED: Ch{img.led_channel} - OFF")
                 
                 # Progress update
                 if c % 5 == 0 or c == cycles:  # Update every 5 cycles or at end
@@ -1553,22 +1185,11 @@ class DMDControllerGUI:
                     remaining = (cycles - c) * cycle_dur
                     self.log_progress(f"Progress: {c}/{cycles} cycles ({c/cycles*100:.1f}%) | Elapsed: {elapsed/60:.1f}min | Remaining: ~{remaining/60:.1f}min")
             
-            # Ensure all LEDs are off at the end
-            if self.coolled_connected and not self.coolled_demo_mode:
-                self.coolled.all_off()
-                self.log_progress("LED: All channels OFF")
-            
             self.log_progress("Pulsed projection completed!" if not self.demo_mode else "[DEMO] Pulsed projection simulation completed!")
             self.root.after(0, self.stop_projection)
             
         except Exception as e:
             self.log_progress(f"Error: {e}")
-            # Ensure LEDs are off on error
-            if self.coolled_connected and not self.coolled_demo_mode:
-                try:
-                    self.coolled.all_off()
-                except:
-                    pass
             self.root.after(0, self.stop_projection)
 
 def main():
