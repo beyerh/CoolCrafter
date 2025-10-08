@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pycrafter6500
 import numpy
 import PIL.Image
-import cv2
 import time
 
 # ============================================================================

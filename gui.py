@@ -263,14 +263,14 @@ class DMDControllerGUI:
         duration_frame = ttk.Frame(settings_inner)
         duration_frame.grid(row=3, column=1, sticky=tk.W, pady=5, padx=(5, 0))
         self.img_duration_var = tk.StringVar(value="60")
-        duration_entry = ttk.Entry(duration_frame, textvariable=self.img_duration_var, width=10)
-        duration_entry.pack(side=tk.LEFT, padx=(0, 2))
+        self.img_duration_entry = ttk.Entry(duration_frame, textvariable=self.img_duration_var, width=10)
+        self.img_duration_entry.pack(side=tk.LEFT, padx=(0, 2))
         self.img_duration_unit_var = tk.StringVar(value="sec")
-        duration_unit_combo = ttk.Combobox(duration_frame, textvariable=self.img_duration_unit_var, values=['sec', 'min', 'hrs'], state='readonly', width=5)
-        duration_unit_combo.pack(side=tk.LEFT)
+        self.img_duration_unit_combo = ttk.Combobox(duration_frame, textvariable=self.img_duration_unit_var, values=['sec', 'min', 'hrs'], state='readonly', width=5)
+        self.img_duration_unit_combo.pack(side=tk.LEFT)
         self.img_duration_var.trace('w', lambda *args: self.on_image_setting_change())
         self.img_duration_unit_var.trace('w', lambda *args: self.on_image_setting_change())
-        ttk.Label(settings_inner, text="(For pulsed mode)", font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W)
+        ttk.Label(settings_inner, text="(For pulsed mode only)", font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W)
         
         # Right Panel
         right_frame = ttk.LabelFrame(main_frame, text="Projection Control", padding="10")
@@ -320,6 +320,26 @@ class DMDControllerGUI:
         
         # Show constant mode frame by default (since constant is the default mode)
         self.constant_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Set initial state for duration field (should be disabled in constant mode)
+        self.update_duration_field_state()
+        
+        # Set up proper window close handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def on_closing(self):
+        """Handle window close event gracefully"""
+        # Stop projection if running
+        if self.projecting:
+            self.stop_projection()
+        # Disconnect from hardware if connected
+        if self.connected and not self.demo_mode:
+            try:
+                self.disconnect_dmd()
+            except:
+                pass
+        # Close the window
+        self.root.destroy()
     
     def connect_dmd(self):
         try:
@@ -395,6 +415,17 @@ class DMDControllerGUI:
         self.constant_time_entry.config(state=state)
         self.constant_time_unit.config(state='disabled' if infinite else 'readonly')
     
+    def update_duration_field_state(self):
+        """Enable/disable duration field based on projection mode"""
+        mode = self.projection_mode.get()
+        # Duration is only relevant in pulsed mode
+        if mode == 'pulsed':
+            self.img_duration_entry.config(state=tk.NORMAL)
+            self.img_duration_unit_combo.config(state='readonly')
+        else:
+            self.img_duration_entry.config(state=tk.DISABLED)
+            self.img_duration_unit_combo.config(state='disabled')
+    
     def on_projection_mode_change(self):
         # Hide all mode-specific frames
         self.sequence_frame.pack_forget()
@@ -412,6 +443,9 @@ class DMDControllerGUI:
             self.pulsed_frame.pack(fill=tk.X, pady=(0, 10))
             self.calculate_cycles_from_runtime()  # Update display
         
+        # Update duration field state based on mode
+        self.update_duration_field_state()
+        
         self.update_sequence_info()
     
     def add_images(self):
@@ -428,6 +462,9 @@ class DMDControllerGUI:
             self.image_tree.insert('', tk.END, values=(os.path.basename(filepath), img_item.mode, img_item.exposure, img_item.dark_time, img_item.duration))
         self.update_sequence_info()
         self.log_progress(f"Added {len(filepaths)} image(s)")
+        # Update pulsed mode calculations if in pulsed mode
+        if self.projection_mode.get() == 'pulsed':
+            self.calculate_cycles_from_runtime()
     
     def remove_selected_image(self):
         sel = self.image_tree.selection()
@@ -546,7 +583,15 @@ class DMDControllerGUI:
             return
         if self.selected_image_index is None: return
         img = self.images[self.selected_image_index]
+        
+        # Flag to track if we should recalculate
+        should_recalculate = False
+        
         try:
+            # Check for empty fields first
+            if not self.img_exposure_var.get() or not self.img_dark_time_var.get() or not self.img_duration_var.get():
+                return  # Don't process if any field is empty
+            
             img.mode = self.img_mode_var.get()
             img.exposure = int(self.img_exposure_var.get())
             img.dark_time = int(self.img_dark_time_var.get())
@@ -561,12 +606,18 @@ class DMDControllerGUI:
                 img.duration = int(duration_value)
             # Store the unit preference with the image
             img.duration_unit = unit
-            if img.image_array: img.load_image()
+            # Fix numpy array boolean check
+            if img.image_array is not None:
+                img.load_image()
             self.refresh_image_list()
-            # Update pulsed mode calculations when duration changes
-            if self.projection_mode.get() == 'pulsed':
-                self.calculate_cycles_from_runtime()
-        except ValueError: pass
+            should_recalculate = True
+        except ValueError:
+            return  # Don't recalculate if there was an error
+        
+        # Update pulsed mode calculations when duration changes
+        if self.projection_mode.get() == 'pulsed' and should_recalculate:
+            # Force recalculation to update display
+            self.calculate_cycles_from_runtime()
     
     def calculate_cycles_from_runtime(self):
         """Calculate number of cycles from total runtime"""

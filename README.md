@@ -22,7 +22,6 @@ Fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with added 8-
   - `pyusb` - USB communication
   - `numpy` - Array operations
   - `PIL/pillow` - Image loading and processing
-  - `cv2` (optional) - Additional image processing
   - `ttkthemes` - For the gui
 
 ### Driver Installation
