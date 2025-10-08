@@ -27,9 +27,9 @@ Fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with added 8-
 ### Driver Installation
 
 **Windows Users**: Install USB drivers using [Zadig](http://zadig.akeo.ie/)
-- Select the DLP LightCrafter 6500 device
-- Choose `WinUSB` driver (recommended for modern systems)
-- If you encounter issues, try `libusbK` or `libusb-win32` as fallbacks
+- Options -> List All Devices
+- Select the DLPC900 device
+- Choose `libusbK` or `libusb-win32` driver 
 - Click "Install Driver"
 
 **Linux/macOS**: libusb should work out of the box
@@ -84,7 +84,7 @@ trigger_in = [False]
 dark_time = [0]
 trigger_out = [1]
 
-dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, 0)
+dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)  # Infinite loop
 dlp.startsequence()
 ```
 
@@ -105,7 +105,7 @@ trigger_in = [False]
 dark_time = [0]
 trigger_out = [1]
 
-dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0)
+dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)  # Infinite loop
 dlp.startsequence()
 ```
 
@@ -130,10 +130,10 @@ dlp.idle_on() / dlp.idle_off() / dlp.standby() / dlp.wakeup() / dlp.reset()
 
 **Parameters:**
 - `images`: List of numpy arrays (1920×1080, uint8). Values: 0-1 (1-bit) or 0-255 (8-bit)
-- `exposure`: List of exposure times in microseconds
+- `exposure`: List of exposure times in microseconds (max: 16,777,215 μs ≈ 16.8 seconds)
 - `trigger_in/out`: External trigger configuration
-- `dark_time`: Dark periods between patterns (μs)
-- `repetitions`: Repeat count (0 = infinite)
+- `dark_time`: Dark periods between patterns (μs, max: 16,777,215 μs)
+- `repetitions`: Total pattern displays (e.g., 10 images with rep=30 = 3 complete cycles). Use 0xFFFFFFFF for infinite loop
 
 ## Folder Structure
 
@@ -198,12 +198,36 @@ python generate_image_sequence.py
 - **Image brightness**: Adjust exposure time (μs) or conversion threshold
 - **8-bit batch error**: Use list with 1 image: `images = [img_array]`
 - **Artifacts**: Verify 1920×1080 resolution and correct value range
+- **Exposure time limits**: 
+  - **Hardware maximum**: Pattern On-The-Fly mode supports 3-5 seconds per pattern (hardware-dependent)
+  - **API maximum**: 16,777,215 μs (≈16.8 seconds) in 24-bit field, but hardware may limit further
+  - **Test your hardware**: Run `python determine_max_exposure.py` to find your exact limit
+  - **For longer projections**: Duplicate images, use more cycles, or use Constant Mode with software timing
+- **Sequence stops early**: The DLPC900's repeat parameter specifies total pattern displays, not loop cycles. With N images, use repeat=N×K for K complete cycles, or 0xFFFFFFFF for infinite. GUI handles this automatically in Sequence Mode.
+- **Exposure time ignored**: If exposure times are not respected, ensure Pattern Trigger Mode is set to Internal (0x00). The library now sets this automatically in `defsequence()` and `defsequence_8bit()`.
+
+## Hardware Testing
+
+Test your hardware's maximum exposure time:
+
+```bash
+python determine_max_exposure.py
+```
+
+This interactive script will:
+- Test exposure times from 1-10 seconds
+- Identify your hardware's maximum
+- Provide exact configuration values
+- Show where to update constants in the code
+
+See `HARDWARE_TESTING.md` for detailed instructions.
 
 ## Technical Details
 
 - **USB**: HID protocol (VID: 0x0451, PID: 0xc900)
 - **Encoding**: Enhanced Run-Length Encoding (ERLE) per DLPC900 spec
 - **Modified files**: `pycrafter6500.py` (8-bit support), `erle.py` (merge_8bit/encode_8bit)
+- **Exposure limits**: Hardware-specific (typically 3-5 seconds in Pattern On-The-Fly mode)
 
 ## Credits
 

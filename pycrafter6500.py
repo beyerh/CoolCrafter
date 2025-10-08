@@ -1,7 +1,17 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+## @package pycrafter6500
+#  Python package for the lightcrafter 6500
+
 import usb.core
 import usb.util
-import time
 import numpy
+
+# DLPC900 Pattern On-The-Fly mode hardware limitation
+# Exposures above this value may terminate early (~3 seconds actual)
+MAX_SAFE_EXPOSURE_US = 6000000  # 5 seconds in microseconds
+MAX_CONFIRMED_EXPOSURE_US = 5000000  # 3 seconds confirmed safe
 import sys
 from erle import encode, encode_8bit
 
@@ -156,6 +166,21 @@ class dmd():
         self.checkforerrors()
 
     def startsequence(self):
+        # CRITICAL: Set all pattern configuration just before starting
+        # Setting these too early may cause them to be reset during pattern upload
+        
+        # 1. Set Display Mode to Pattern On-The-Fly (3)
+        self.command('w',0x00,0x1a,0x1b,[3])
+        self.checkforerrors()
+        
+        # 2. Set Pattern Display Data Input Source to Streaming (0x00)
+        self.command('w',0x00,0x1a,0x22,[0x00])
+        self.checkforerrors()
+        
+        # 3. Set Pattern Trigger Mode to Internal (0x00)
+        self.command('w',0x00,0x1a,0x23,[0x00])
+        self.checkforerrors()
+        
         self.command('w',0x00,0x1a,0x24,[2])
         self.checkforerrors()
 
@@ -177,6 +202,10 @@ class dmd():
         bytes=bitstobytes(string)
 
         self.command('w',0x00,0x1a,0x31,bytes)
+        self.checkforerrors()
+        
+        # CRITICAL: Validate LUT (0x1A1A) - activates patterns
+        self.command('w',0x00,0x1a,0x1a,[0x00])
         self.checkforerrors()
         
 
@@ -277,6 +306,10 @@ class dmd():
 
 
     def defsequence(self,images,exp,ti,dt,to,rep):
+        
+        # CRITICAL: Must be in Pattern On-The-Fly mode to define patterns
+        self.command('w',0x00,0x1a,0x1b,[3])
+        self.checkforerrors()
 
         self.stopsequence()
 
@@ -304,6 +337,17 @@ class dmd():
             encodedimages.append(imagedata)
             sizes.append(size)
 
+        # First upload all images
+        for i in range((num-1)//24+1):
+            self.setbmp((num-1)//24-i,sizes[(num-1)//24-i])
+            print ('uploading...')
+            self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
+
+        # THEN define patterns (after images are uploaded)
+        if num <= 24:
+            for j in range(num):
+                self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],0,j)
+        else:
             if i<((num-1)//24):
                 for j in range(i*24,(i+1)*24):
                     self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
@@ -311,14 +355,8 @@ class dmd():
                 for j in range(i*24,num):
                     self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
 
+        # Finally configure LUT
         self.configurelut(num,rep)
-
-        for i in range((num-1)//24+1):
-        
-            self.setbmp((num-1)//24-i,sizes[(num-1)//24-i])
-
-            print ('uploading...')
-            self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
 
 
     def defsequence_8bit(self,images,exp,ti,dt,to,rep):

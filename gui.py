@@ -9,6 +9,10 @@ import numpy as np
 import os, threading, time
 import pycrafter6500
 
+# DLPC900 Pattern On-The-Fly hardware limits
+MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds - may work but test your hardware
+MAX_RECOMMENDED_EXPOSURE_US = 3000000  # 3 seconds - confirmed safe
+
 class ImageItem:
     def __init__(self, filepath, mode='1bit'):
         self.filepath = filepath
@@ -20,13 +24,34 @@ class ImageItem:
         self.duration = 60
         self.image_array = None
         self.thumbnail = None
+        self.thumbnail_mirrored = None
+        self._pil_image = None  # Cache PIL image for faster reloading
     
-    def load_image(self):
+    def load_image(self, force_reload=False):
+        """Load full image array. Only loads once unless force_reload=True"""
+        if self.image_array is not None and not force_reload:
+            return self.image_array  # Already loaded
+        
         img = Image.open(self.filepath)
         if img.mode != 'L': img = img.convert('L')
         if img.size != (1920, 1080): img = img.resize((1920, 1080), Image.LANCZOS)
+        self._pil_image = img  # Cache for thumbnail generation
         img_array = np.array(img)
         self.image_array = img_array // 129 if self.mode == '1bit' else img_array.astype(np.uint8)
+        return self.image_array
+    
+    def load_thumbnail(self):
+        """Load thumbnail for preview. Fast, lightweight operation"""
+        if self.thumbnail is not None:
+            return  # Already loaded
+        
+        # Use cached PIL image if available, otherwise load just for thumbnail
+        if self._pil_image is not None:
+            img = self._pil_image
+        else:
+            img = Image.open(self.filepath)
+            if img.mode != 'L': img = img.convert('L')
+        
         # Create thumbnail maintaining exact 16:9 aspect ratio (1920:1080)
         thumb = img.copy()
         thumb.thumbnail((480, 270), Image.LANCZOS)
@@ -34,7 +59,6 @@ class ImageItem:
         # Also create mirrored version
         thumb_mirrored = thumb.transpose(Image.FLIP_LEFT_RIGHT)
         self.thumbnail_mirrored = ImageTk.PhotoImage(thumb_mirrored)
-        return self.image_array
 
 class DMDControllerGUI:
     def __init__(self, root):
@@ -107,10 +131,10 @@ class DMDControllerGUI:
         
         # Sequence mode settings (1-bit images)
         self.sequence_frame = ttk.LabelFrame(left_frame, text="Sequence Mode Settings", padding="5")
-        ttk.Label(self.sequence_frame, text="Repeat Count (0=infinite):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Label(self.sequence_frame, text="Number of Cycles (0=infinite):").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.seq_repeat_count_var = tk.StringVar(value="0")
         ttk.Entry(self.sequence_frame, textvariable=self.seq_repeat_count_var, width=15).grid(row=0, column=1, pady=2)
-        ttk.Label(self.sequence_frame, text="Cycles through all 1-bit images", font=('TkDefaultFont', 8), foreground='gray').grid(row=1, column=0, columnspan=2, sticky=tk.W)
+        ttk.Label(self.sequence_frame, text="1 cycle = all images shown once", font=('TkDefaultFont', 8), foreground='gray').grid(row=1, column=0, columnspan=2, sticky=tk.W)
         
         # Constant mode settings (single image)
         self.constant_frame = ttk.LabelFrame(left_frame, text="Constant Mode Settings", padding="5")
@@ -180,7 +204,8 @@ class DMDControllerGUI:
         ttk.Label(global_frame, text="Default Exposure (μs):").grid(row=1, column=0, sticky=tk.W, pady=2)
         self.default_exposure_var = tk.StringVar(value='4046')
         ttk.Entry(global_frame, textvariable=self.default_exposure_var, width=15).grid(row=1, column=1, pady=2)
-        ttk.Button(global_frame, text="Apply to All", command=self.apply_default_mode).grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        ttk.Label(global_frame, text="Max: 16,777,215 μs (≈16.8s)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=0, columnspan=2, sticky=tk.W)
+        ttk.Button(global_frame, text="Apply to All", command=self.apply_default_mode).grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
         
         # Center Panel
         center_frame = ttk.Frame(main_frame)
@@ -359,7 +384,7 @@ class DMDControllerGUI:
             self.disconnect_btn.config(state=tk.NORMAL)
             self.start_btn.config(state=tk.NORMAL)
             self.log_progress("Connected successfully!")
-            messagebox.showinfo("Success", "Connected to DMD hardware!")
+            #messagebox.showinfo("Success", "Connected to DMD hardware!")
             
         except Exception as e:
             self.log_progress(f"Hardware connection failed: {e}")
@@ -572,7 +597,8 @@ class DMDControllerGUI:
         self._loading_image = False
         
         try:
-            img.load_image()
+            # Load thumbnail only for preview (fast)
+            img.load_thumbnail()
             self.display_preview(img)
         except Exception as e:
             self.log_progress(f"Load error: {e}")
@@ -708,11 +734,22 @@ class DMDControllerGUI:
             thumb = img.thumbnail_mirrored if (self.mirror_preview_var.get() and hasattr(img, 'thumbnail_mirrored')) else img.thumbnail
             x, y = (canvas_w - thumb.width()) // 2, (canvas_h - thumb.height()) // 2
             self.preview_canvas.create_image(x, y, anchor=tk.NW, image=thumb)
-            self.preview_label.config(text=f"{os.path.basename(img.filepath)} | {img.mode} | Range: {img.image_array.min()}-{img.image_array.max()}", foreground="black")
+            # Show range only if image is loaded (avoid triggering load for preview)
+            if img.image_array is not None:
+                self.preview_label.config(text=f"{os.path.basename(img.filepath)} | {img.mode} | Range: {img.image_array.min()}-{img.image_array.max()}", foreground="black")
+            else:
+                self.preview_label.config(text=f"{os.path.basename(img.filepath)} | {img.mode}", foreground="black")
     
     def update_preview_during_projection(self, img, status_text=""):
         """Thread-safe method to update preview during projection"""
         def _update():
+            # Load thumbnail if not already loaded
+            if img.thumbnail is None:
+                try:
+                    img.load_thumbnail()
+                except:
+                    pass  # If thumbnail load fails, skip preview update
+            
             if img.thumbnail:
                 self.preview_canvas.delete("all")
                 canvas_w, canvas_h = 480, 270
@@ -796,6 +833,40 @@ class DMDControllerGUI:
             return f"{minutes}m {secs}s"
         else:
             return f"{secs}s"
+    
+    def validate_exposure_times(self, images_to_check):
+        """Validate that exposure times are within hardware limits"""
+        warnings = []
+        errors = []
+        
+        for img in images_to_check:
+            if img.exposure > MAX_SAFE_EXPOSURE_US:
+                errors.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_SAFE_EXPOSURE_US/1000000}s limit)")
+            elif img.exposure > MAX_RECOMMENDED_EXPOSURE_US:
+                warnings.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_RECOMMENDED_EXPOSURE_US/1000000}s recommended)")
+        
+        if errors:
+            msg = "❌ Exposure times EXCEED hardware limit!\n\n"
+            msg += "Projections will terminate early (~3 seconds actual).\n\n"
+            msg += "Images with invalid exposures:\n"
+            for err in errors:
+                msg += f"• {err}\n"
+            msg += f"\n💡 Solution: Keep exposures ≤ {MAX_SAFE_EXPOSURE_US/1000000}s"
+            msg += "\nFor longer projections, duplicate the image or use more cycles."
+            messagebox.showerror("Exposure Time Error", msg)
+            return False
+        
+        if warnings:
+            msg = f"⚠️ Some exposures exceed {MAX_RECOMMENDED_EXPOSURE_US/1000000}s (confirmed safe limit):\n\n"
+            for warn in warnings:
+                msg += f"• {warn}\n"
+            msg += f"\nThey may work up to {MAX_SAFE_EXPOSURE_US/1000000}s, but test your hardware.\n"
+            msg += "For guaranteed reliability, keep exposures ≤ 3s.\n\n"
+            msg += "Continue anyway?"
+            if not messagebox.askyesno("Exposure Time Warning", msg):
+                return False
+        
+        return True
     
     def start_projection(self):
         if not self.connected:
@@ -891,7 +962,14 @@ class DMDControllerGUI:
         try:
             self.log_progress("Starting sequence projection..." if not self.demo_mode else "[DEMO] Starting sequence projection simulation...")
             bit1 = [i for i in self.images if i.mode=='1bit']
-            rep = int(self.seq_repeat_count_var.get()) if self.seq_repeat_count_var.get().isdigit() else 0
+            # DLPC900 repeat count = TOTAL pattern displays, not sequence loops
+            # User enters "cycles", we need to multiply by number of images
+            rep_input = int(self.seq_repeat_count_var.get()) if self.seq_repeat_count_var.get().isdigit() else 0
+            if rep_input == 0:
+                rep = 0xFFFFFFFF  # Infinite
+            else:
+                # For K cycles of N images: repeat = K * N total displays
+                rep = rep_input * len([i for i in self.images if i.mode=='1bit'])
             
             if not bit1:
                 self.log_progress("Error: No 1-bit images found for sequence mode. Set Mode to 1-bit.")
@@ -903,31 +981,53 @@ class DMDControllerGUI:
                 if img.image_array is None:
                     img.load_image()
             
+            # Validate exposure times before starting
+            if not self.demo_mode and not self.validate_exposure_times(bit1):
+                self.root.after(0, self.stop_projection)
+                return
+            
             if self.demo_mode:
                 # Demo mode
                 self.log_progress(f"[DEMO] Would project {len(bit1)} 1-bit image(s) in sequence:")
                 for idx, img in enumerate(bit1, 1):
                     self.log_progress(f"[DEMO]   {idx}. {os.path.basename(img.filepath)} (Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
-                self.log_progress(f"[DEMO] Repeat count: {rep if rep > 0 else 'infinite'}")
-                self.log_progress("[DEMO] Sequence would cycle continuously until stopped...")
+                self.log_progress(f"[DEMO] Cycles: {'infinite' if rep == 0xFFFFFFFF else f'{rep_input} ({rep} total displays)'}")
+                if rep == 0xFFFFFFFF:
+                    self.log_progress("[DEMO] Sequence would cycle continuously until stopped...")
+                else:
+                    self.log_progress(f"[DEMO] Sequence would run for {rep} displays then stop automatically")
             else:
                 # Real hardware mode
                 self.log_progress(f"Projecting sequence of {len(bit1)} 1-bit image(s):")
                 for idx, img in enumerate(bit1, 1):
                     self.log_progress(f"  {idx}. {os.path.basename(img.filepath)} (Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
-                self.log_progress(f"Repeat count: {rep if rep > 0 else 'infinite'}")
+                self.log_progress(f"Cycles: {'infinite' if rep == 0xFFFFFFFF else f'{rep_input} ({rep} total displays)'}")
                 self.dlp.defsequence([i.image_array for i in bit1], [i.exposure for i in bit1], [False]*len(bit1), [i.dark_time for i in bit1], [1]*len(bit1), rep)
                 self.dlp.startsequence()
                 self.log_progress("Sequence projection started")
             
             # Cycle through images in preview to visualize sequence
             idx = 0
+            total_displays = rep if rep != 0xFFFFFFFF else None  # None means infinite
+            
             while self.projecting and not self.stop_projection_flag:
+                # Check if we've reached the target number of displays (for finite sequences)
+                if total_displays is not None and idx >= total_displays:
+                    self.log_progress("Sequence completed!")
+                    self.root.after(0, self.stop_projection)
+                    break
+                
                 img = bit1[idx % len(bit1)]
-                self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)}")
+                if total_displays is not None:
+                    # Show progress for finite sequences
+                    self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)} | Display {idx+1}/{total_displays}")
+                else:
+                    # Show frame info for infinite sequences
+                    self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)}")
+                
                 # Calculate time to display based on exposure + dark time (in seconds)
                 display_time = (img.exposure + img.dark_time) / 1000000.0  # Convert μs to seconds
-                time.sleep(max(display_time, 0.05))  # Minimum 50ms for visibility
+                time.sleep(display_time)
                 idx += 1
                 
         except Exception as e:
@@ -958,6 +1058,11 @@ class DMDControllerGUI:
                     total_time = time_value
             
             self.log_progress("Starting constant projection..." if not self.demo_mode else "[DEMO] Starting constant projection simulation...")
+            
+            # Validate exposure time before starting
+            if not self.demo_mode and not self.validate_exposure_times([img]):
+                self.root.after(0, self.stop_projection)
+                return
             
             # Update preview to show the projected image
             self.update_preview_during_projection(img, "Projecting...")
@@ -990,8 +1095,8 @@ class DMDControllerGUI:
                 self.log_progress(f"Mode: {img.mode}, Exposure: {img.exposure}μs, Dark Time: {img.dark_time}μs")
                 self.log_progress(f"Duration: {total_time:.1f}s" if total_time else "Duration: Infinite (until stopped)")
                 
-                # Use repeat=0 for infinite projection
-                rep = 0
+                # Use 0xFFFFFFFF for infinite projection (DLPC900 standard)
+                rep = 0xFFFFFFFF
                 
                 if img.mode == '1bit':
                     # Project single 1-bit image
@@ -1060,31 +1165,19 @@ class DMDControllerGUI:
                         self.log_progress(f"[DEMO] Projecting {filename} ({img.mode}) for {img.duration}s...")
                         time.sleep(img.duration)  # Use full duration in demo mode
                     else:
-                        # Real hardware mode - measure actual time to compensate for setup overhead
+                        # Real hardware mode
                         self.log_progress(f"Projecting {filename} ({img.mode}) for {img.duration}s...")
                         
-                        # Start timing before setup
-                        img_start_time = time.time()
-                        
-                        # Setup sequence (this takes time, especially for 8-bit)
+                        # Setup sequence
                         if img.mode == '1bit':
                             self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
                         else:
                             self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
                         self.dlp.startsequence()
                         
-                        # Calculate remaining time after setup overhead
-                        setup_time = time.time() - img_start_time
-                        remaining_time = max(0, img.duration - setup_time)
-                        
-                        # Sleep for the remaining duration to achieve exact total time
-                        time.sleep(remaining_time)
+                        # Sleep for the projection duration
+                        time.sleep(img.duration)
                         self.dlp.stopsequence()
-                        
-                        # Log actual timing for debugging
-                        actual_duration = time.time() - img_start_time
-                        if abs(actual_duration - img.duration) > 0.5:  # Log if off by more than 0.5s
-                            self.log_progress(f"  Actual duration: {actual_duration:.1f}s (setup took {setup_time:.1f}s)")
                 
                 # Progress update
                 if c % 5 == 0 or c == cycles:  # Update every 5 cycles or at end

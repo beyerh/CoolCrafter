@@ -62,9 +62,9 @@ dark_time = [0]
 trigger_in = [False]   # No external trigger input
 trigger_out = [1]      # Trigger output enabled
 
-# Define the 8-bit sequence (repeat=0 means infinite loop)
+# Define the 8-bit sequence (0xFFFFFFFF means infinite loop)
 print("\nDefining 8-bit grayscale sequence...")
-dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0)
+dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)
 
 t_start = time.time()
 print(f"Startup time: {round(t_start - t0, 4)} sec")

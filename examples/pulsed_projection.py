@@ -89,11 +89,11 @@ def project_image(dlp, image, duration_seconds, mode='1bit'):
     trigger_in = [False]
     trigger_out = [1]
     
-    # Define and start the sequence (repeat=0 for continuous)
+    # Define and start the sequence (0xFFFFFFFF for infinite loop)
     if mode == '8bit':
-        dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0)
+        dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)
     else:
-        dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, 0)
+        dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)
     
     dlp.startsequence()
     
