@@ -1,245 +1,169 @@
-# Pycrafter6500-8bit - Python Controller for TI DLP LightCrafter 6500
+# CoolCrafter - Synchronized DMD & LED Control for Optogenetics
 
-Python controller for Texas Instruments' DLPLCR6500EVM with 8-bit grayscale support. Controls pattern on-the-fly mode with binary and grayscale image sequences. Compatible with [uPatternScope](https://doi.org/10.1038/s41467-024-54351-6) for optogenetic microscopy.
+**Designed for [uPatternScope](https://github.com/santkumar/uPatternScope)** - an optogenetic microscopy platform for spatiotemporal illumination control.
 
-## About This Fork
+Integrated control system for the **TI DLP LightCrafter 6500** (DMD) and **CoolLED pE-4000** (LED illumination). Provides synchronized projection and LED control for optogenetic experiments with precise spatial and temporal control.
 
-Fork of [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with added 8-bit grayscale support, developed using reference code from [uPatternScope](https://github.com/santkumar/uPatternScope).
+**Built on:**
+- [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) - DMD control foundation
+- [uPatternScope](https://github.com/santkumar/uPatternScope) - 8-bit grayscale support and optogenetic workflows
+- [CoolLED_control](https://github.com/philglock/CoolLED_control) - LED integration
 
-## Features
+## Applications
 
-- **1-bit and 8-bit Image Projection**: Binary patterns and 256-level grayscale
-- **Pattern On-The-Fly Mode**: Upload and display image sequences via USB
-- **Flexible Timing Control**: Independent exposure times, dark times, and triggers
-- **Fast Image Encoding**: Enhanced Run-Length Encoding (ERLE) for efficient data transfer
-- **Multiple Example Scripts**: Ready-to-use examples for various use cases
-- **Cross-Platform**: Compatible with Windows, macOS, and Linux
+Three GUI applications for different use cases:
 
-## Requirements
+### **CoolCrafter_gui.py** (Main Application)
+**Synchronized DMD + LED control** for integrated optogenetic experiments.
+- Controls both DMD projection and LED illumination simultaneously
+- Per-image LED wavelength and intensity settings (4 independent channels)
+- Three projection modes: Sequence, Constant, Pulsed
+- Real-time projection timer with progress tracking
+- **Use this for synchronized optogenetic stimulation**
 
-- **Python**: 2.x or 3.x (tested up to 3.8)
-- **Dependencies**:
-  - `pyusb` - USB communication
-  - `numpy` - Array operations
-  - `PIL/pillow` - Image loading and processing
-  - `ttkthemes` - For the gui
+### **Pycrafter6500_gui.py** (DMD Standalone)
+**DMD-only control** for pattern projection without LED synchronization.
+- 1-bit and 8-bit grayscale image projection
+- Pattern-on-the-fly mode with up to 24 images (1-bit) or 1 image (8-bit)
+- Fine-grained exposure and dark time control
+- **Use this for pure DMD projection tasks**
 
-### Driver Installation
+### 💡 **CoolLED_gui.py** (LED Standalone)
+**CoolLED pE-4000 control** for LED illumination without DMD.
+- Independent 4-channel control (A, B, C, D)
+- Wavelength selection per channel:
+  - Channel A: UV range (365-435nm)
+  - Channel B: Blue range (460-500nm)
+  - Channel C: Green/Yellow range (525-595nm)
+  - Channel D: Red/NIR range (635-770nm)
+- Real-time intensity adjustment (0-100%) per channel
+- Built-in function generator for dynamic illumination patterns
+- Live connection status and device info
+- Auto-detection of serial port and baud rate
+- **Use this for testing LED modules, calibrating intensities, or standalone illumination experiments**
 
-**Windows Users**: Install USB drivers using [Zadig](http://zadig.akeo.ie/)
-- Options -> List All Devices
-- Select the DLPC900 device
-- Choose `libusbK` or `libusb-win32` driver 
-- Click "Install Driver"
+## Screenshot
 
-**Linux/macOS**: libusb should work out of the box
+<img src="doc/screen.png" alt="CoolCrafter GUI" width="800"/>
 
-## Installation
-
-```bash
-# Install dependencies
-pip install pyusb numpy pillow opencv-python ttkthemes
-```
-
-## Graphical User Interface
-
-Modern GUI for DMD control without coding. Launch with `python gui.py`.
-
-<img src="doc/screen.png" alt="GUI Screenshot" width="800"/>
-
-**Features:**
-- **Three projection modes**: Sequence (24×1-bit), Constant (single image), Pulsed (timed alternation)
-- **Image management**: Multi-select, reordering (Move Up/Down or Ctrl+Up/Down), live preview with mirror option
-- **Flexible timing**: Per-image exposure/dark time/duration with bidirectional calculations
-- **Demo mode**: Test without hardware
+*CoolCrafter main interface showing synchronized DMD and LED control with image preview, per-image LED settings, and real-time projection status.*
 
 ## Quick Start
 
-### Basic Connection
+### Installation
 
-```python
-import pycrafter6500
-
-# Connect to DMD
-dlp = pycrafter6500.dmd()
-
-# Set to pattern on-the-fly mode
-dlp.changemode(3)
+```bash
+# Install dependencies
+pip install pyusb pyserial numpy pillow ttkthemes
 ```
 
-### Project a 1-bit Binary Image
+**Windows USB Drivers (DMD)**: Install using [Zadig](http://zadig.akeo.ie/)
+- Options → List All Devices → Select DLPC900
+- Choose `libusbK` or `libusb-win32` driver → Install
 
-```python
-import numpy as np
-from PIL import Image
+**CoolLED pE Driver**: Required for CoolLED pE-4000 control
+- Download: [CoolLED pE Driver](https://www.coolled.com/support/imaging-software/#coolled-pe-driver)
 
-# Load and convert image to binary
-img = Image.open("image.png").convert('L').resize((1920, 1080))
-img_array = np.array(img) // 129  # Convert to 0 or 1
 
-# Define sequence
-images = [img_array]
-exposure = [4046]  # microseconds
-trigger_in = [False]
-dark_time = [0]
-trigger_out = [1]
+### Launch Applications
 
-dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)  # Infinite loop
-dlp.startsequence()
+**Launcher (Recommended):**
+```bash
+python launcher.py
+```
+A simple menu will appear allowing you to choose which application to start.
+
+**Direct Launch:**
+```bash
+# Main synchronized app (DMD + LED)
+python CoolCrafter_gui.py
+
+# DMD only
+python Pycrafter6500_gui.py
+
+# LED only
+python CoolLED_gui.py
 ```
 
-### Project an 8-bit Grayscale Image
+**Windows Users**: Double-click `launch_gui.bat` or `launch_gui.vbs` to start the launcher. See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for creating desktop shortcuts and taskbar pinning.
 
-```python
-import numpy as np
-from PIL import Image
+## Key Features
 
-# Load 8-bit grayscale image
-img = Image.open("photo.tif").convert('L').resize((1920, 1080))
-img_array = np.array(img, dtype=np.uint8)  # Keep 0-255 values
+**DMD Control:**
+- 1-bit (binary) and 8-bit (256-level grayscale) projection
+- Pattern-on-the-fly mode: up to 24×1-bit or 1×8-bit images
+- Flexible timing: per-image exposure, dark time, duration
+- Three projection modes: Sequence, Constant, Pulsed
 
-# Define 8-bit sequence
-images = [img_array]
-exposure = [4046]  # microseconds
-trigger_in = [False]
-dark_time = [0]
-trigger_out = [1]
+**CoolLED Integration:**
+- 4 independent channels (A, B, C, D)
+- Wavelength selection: UV (365-435nm), Blue (460-500nm), Green/Yellow (525-595nm), Red/NIR (635-770nm)
+- Per-channel intensity control (0-100%)
+- Synchronized with DMD projection timing
 
-dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, 0xFFFFFFFF)  # Infinite loop
-dlp.startsequence()
-```
-
-## API Reference
-
-### Core Methods
-
-```python
-dlp = pycrafter6500.dmd()                          # Initialize connection
-dlp.changemode(3)                                   # Set to pattern on-the-fly mode
-
-# 1-bit: Up to 24 images
-dlp.defsequence(images, exposure, trigger_in, dark_time, trigger_out, repetitions)
-
-# 8-bit: 1 image at a time
-dlp.defsequence_8bit(images, exposure, trigger_in, dark_time, trigger_out, repetitions)
-
-# Control
-dlp.startsequence() / dlp.pausesequence() / dlp.stopsequence()
-dlp.idle_on() / dlp.idle_off() / dlp.standby() / dlp.wakeup() / dlp.reset()
-```
-
-**Parameters:**
-- `images`: List of numpy arrays (1920×1080, uint8). Values: 0-1 (1-bit) or 0-255 (8-bit)
-- `exposure`: List of exposure times in microseconds (max: 16,777,215 μs ≈ 16.8 seconds)
-- `trigger_in/out`: External trigger configuration
-- `dark_time`: Dark periods between patterns (μs, max: 16,777,215 μs)
-- `repetitions`: Total pattern displays (e.g., 10 images with rep=30 = 3 complete cycles). Use 0xFFFFFFFF for infinite loop
-
-## Folder Structure
-
-```
-Pycrafter6500-8bit/
-├── gui.py                          # GUI application
-├── pycrafter6500.py               # Core DMD library
-├── erle.py                        # Image encoding (ERLE)
-├── generate_image_sequence.py     # Generate 24-frame test sequence
-├── examples/
-│   ├── constant_projection.py     # Single image projection
-│   └── pulsed_projection.py       # Timed alternating projection
-├── images/
-│   └── sequence/                  # Generated test patterns (24 frames)
-└── doc/
-    └── screen.png                 # GUI screenshot
-```
 
 ## Example Scripts
 
-### `constant_projection.py`
+Ready-to-use Python scripts for common projection tasks:
+
+### **`examples/constant_projection.py`**
 Continuously project a single 8-bit grayscale image.
-```bash
-python examples/constant_projection.py
+
+### **`examples/pulsed_projection.py`**
+Alternate between two images with configurable timing.
+
+**For GUI users**: Use **CoolCrafter_gui.py** for interactive control with LED synchronization!
+
+## Project Structure
+
+```
+CoolCrafter/
+├── CoolCrafter_gui.py             # Main app (DMD + LED)
+├── Pycrafter6500_gui.py           # DMD standalone
+├── CoolLED_gui.py                 # LED standalone
+├── pycrafter6500.py               # DMD controller library
+├── erle.py                        # Image encoding (ERLE)
+├── examples/
+│   ├── constant_projection.py     # Single image projection
+│   └── pulsed_projection.py       # Timed alternating projection
+└── images/                        # Test images
 ```
 
-### `pulsed_projection.py`
-Alternate between two images with configurable timing. Edit script to configure durations and modes (1-bit or 8-bit).
-```bash
-python examples/pulsed_projection.py
-```
+## Technical Notes
 
-### `generate_image_sequence.py`
-Generate 24-frame test sequence for Sequence Mode. Creates rotating patterns spanning full screen.
-```bash
-python generate_image_sequence.py
-```
+**8-bit Grayscale**: Uses Binary PWM - image decomposed into 8 bit planes, each displayed with weighted exposure (1×, 2×, 4×, ... 128×). 
 
-## 8-bit Grayscale: How It Works
+**Image Requirements**: 1920×1080 (auto-resized), PNG/JPEG/TIFF/BMP, numpy arrays with 0-1 (1-bit) or 0-255 (8-bit)
 
-8-bit grayscale uses **Binary Pulse Width Modulation (PWM)**:
-1. Image decomposed into 8 binary bit planes
-2. Each plane displayed with weighted exposure (1×, 2×, 4×, ... 128×)
-3. Eye integrates rapid flashes to perceive 256 gray levels
+**Limitations**: 
+- 1-bit mode: up to 24 images; 8-bit mode: 1 image at a time
+- **Sequence/Constant modes**: Hardware exposure limited to ~3-5 seconds (hardware-dependent)
+- **Pulsed mode**: No exposure limit - uses software-controlled duration for any length
 
-| Feature | 1-bit | 8-bit |
-|---------|-------|-------|
-| **Levels** | 2 (black/white) | 256 |
-| **Values** | 0-1 | 0-255 |
-| **Exposure** | ~4ms | ~100ms |
-| **Batch** | Up to 24 images | 1 image |
-
-## Image Requirements
-
-- **Resolution**: 1920×1080 (auto-resized)
-- **Format**: PNG, JPEG, TIFF, BMP (PIL-supported)
-- **Data**: numpy.uint8 arrays (0-1 for 1-bit, 0-255 for 8-bit)
-
-## Troubleshooting
-
-- **DMD not detected**: Check USB connection and drivers (Windows: use Zadig)
-- **Image brightness**: Adjust exposure time (μs) or conversion threshold
-- **8-bit batch error**: Use list with 1 image: `images = [img_array]`
-- **Artifacts**: Verify 1920×1080 resolution and correct value range
-- **Exposure time limits**: 
-  - **Hardware maximum**: Pattern On-The-Fly mode supports 3-5 seconds per pattern (hardware-dependent)
-  - **API maximum**: 16,777,215 μs (≈16.8 seconds) in 24-bit field, but hardware may limit further
-  - **Test your hardware**: Run `python determine_max_exposure.py` to find your exact limit
-  - **For longer projections**: Duplicate images, use more cycles, or use Constant Mode with software timing
-- **Sequence stops early**: The DLPC900's repeat parameter specifies total pattern displays, not loop cycles. With N images, use repeat=N×K for K complete cycles, or 0xFFFFFFFF for infinite. GUI handles this automatically in Sequence Mode.
-- **Exposure time ignored**: If exposure times are not respected, ensure Pattern Trigger Mode is set to Internal (0x00). The library now sets this automatically in `defsequence()` and `defsequence_8bit()`.
+**Tip**: For projections longer than a few seconds, use Pulsed mode with the duration parameter!
 
 ## Hardware Testing
 
-Test your hardware's maximum exposure time:
+Test your hardware's maximum exposure time (relevant for Sequence/Constant modes):
 
 ```bash
 python determine_max_exposure.py
 ```
 
-This interactive script will:
-- Test exposure times from 1-10 seconds
-- Identify your hardware's maximum
-- Provide exact configuration values
-- Show where to update constants in the code
+**See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for detailed testing instructions, troubleshooting, and configuration examples.**
 
-See `HARDWARE_TESTING.md` for detailed instructions.
 
-## Technical Details
-
-- **USB**: HID protocol (VID: 0x0451, PID: 0xc900)
-- **Encoding**: Enhanced Run-Length Encoding (ERLE) per DLPC900 spec
-- **Modified files**: `pycrafter6500.py` (8-bit support), `erle.py` (merge_8bit/encode_8bit)
-- **Exposure limits**: Hardware-specific (typically 3-5 seconds in Pattern On-The-Fly mode)
 
 ## Credits
 
-- **Original**: [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) | [DOI: 10.1364/OE.25.000949](https://doi.org/10.1364/OE.25.000949)
-- **8-bit reference**: [uPatternScope](https://github.com/santkumar/uPatternScope) | [DOI: 10.1038/s41467-024-54351-6](https://doi.org/10.1038/s41467-024-54351-6)
-- **Contributors**: Guangyuan Zhao (Python 3.x), Ashu (@e841018) - [ERLE encoder](https://github.com/e841018/ERLE)
-- **Documentation**: [DLPC900 Programmer's Guide](http://www.ti.com/lit/ug/dlpu018b/dlpu018b.pdf)
+Based on [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) with 8-bit support from [uPatternScope](https://github.com/santkumar/uPatternScope). CoolLED integration based on [CoolLED_control](https://github.com/philglock/CoolLED_control). Uses [ERLE encoding](https://github.com/e841018/ERLE) for image compression.
 
-## License
-
-See `license.txt`
+**References:**
+- uPatternScope: [DOI: 10.1038/s41467-024-54351-6](https://doi.org/10.1038/s41467-024-54351-6)
+- Original Pycrafter: [DOI: 10.1364/OE.25.000949](https://doi.org/10.1364/OE.25.000949)
+- CoolLED Control: [philglock/CoolLED_control](https://github.com/philglock/CoolLED_control)
+- TI DLPC900: [Programmer's Guide](http://www.ti.com/lit/ug/dlpu018b/dlpu018b.pdf)
 
 ---
 
-**Version**: 1.1 (8-bit grayscale support) | October 2025
+**License**: See `license.txt` | **Version**: 2.0 (CoolCrafter) | January 2025

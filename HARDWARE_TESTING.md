@@ -66,41 +66,27 @@ The script provides exact code snippets to copy-paste.
 
 ## Updating Configuration Values
 
-### File 1: pycrafter6500.py
+**Only one file needs to be updated** - all GUI applications import these values from `pycrafter6500.py`.
+
+### File: pycrafter6500.py
 
 **Location:** Near the top of the file (around line 13)
 
 **Find:**
 ```python
 # DLPC900 Pattern On-The-Fly mode hardware limitation
-MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds in microseconds
-MAX_CONFIRMED_EXPOSURE_US = 3000000  # 3 seconds confirmed safe
+MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds - hardware maximum
+MAX_RECOMMENDED_EXPOSURE_US = 3000000  # 3 seconds - recommended safe limit
 ```
 
 **Replace with your tested values:**
 ```python
 # DLPC900 Pattern On-The-Fly mode hardware limitation
-MAX_SAFE_EXPOSURE_US = YOUR_MAX_HERE  # Your hardware maximum
-MAX_CONFIRMED_EXPOSURE_US = YOUR_SAFE_HERE  # 80% of max for safety
+MAX_SAFE_EXPOSURE_US = YOUR_MAX_HERE  # Your hardware maximum (e.g., 5000000)
+MAX_RECOMMENDED_EXPOSURE_US = YOUR_SAFE_HERE  # Recommended limit (e.g., 4000000 = 80% of max)
 ```
 
-### File 2: gui.py
-
-**Location:** Near the top of the file (around line 13)
-
-**Find:**
-```python
-# DLPC900 Pattern On-The-Fly hardware limits
-MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds
-MAX_RECOMMENDED_EXPOSURE_US = 3000000  # 3 seconds
-```
-
-**Replace with your tested values:**
-```python
-# DLPC900 Pattern On-The-Fly hardware limits
-MAX_SAFE_EXPOSURE_US = YOUR_MAX_HERE  # Your hardware maximum
-MAX_RECOMMENDED_EXPOSURE_US = YOUR_SAFE_HERE  # Recommended safe limit
-```
+**That's it!** All GUI applications (CoolCrafter_gui.py, Pycrafter6500_gui.py) will automatically use the updated values.
 
 ## Example Results
 

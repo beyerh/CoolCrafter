@@ -1,6 +1,11 @@
 # Windows Desktop Integration Guide
 
-This guide shows you how to create a desktop icon and pin the Pycrafter6500-8bit GUI to your Windows taskbar.
+This guide shows you how to create a desktop icon and pin the CoolCrafter GUI applications to your Windows taskbar.
+
+**Available Applications:**
+- `CoolCrafter_gui.py` - Main app (synchronized DMD + LED control)
+- `Pycrafter6500_gui.py` - DMD standalone control
+- `CoolLED_gui.py` - LED standalone control
 
 ## Quick Launch Options
 
@@ -28,7 +33,7 @@ Simply double-click either file to launch the GUI!
 1. Right-click the shortcut → **Properties**
 2. Click **"Change Icon..."**
 3. Browse and select an icon (or use default)
-4. Optionally rename: `Pycrafter6500 Controller`
+4. Optionally rename: `CoolCrafter` (or `DMD Controller`, `LED Controller` for standalone apps)
 5. Click **OK**
 
 ### Step 3: Pin to Taskbar

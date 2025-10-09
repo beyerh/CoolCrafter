@@ -9,9 +9,9 @@ import usb.util
 import numpy
 
 # DLPC900 Pattern On-The-Fly mode hardware limitation
-# Exposures above this value may terminate early (~3 seconds actual)
-MAX_SAFE_EXPOSURE_US = 6000000  # 5 seconds in microseconds
-MAX_CONFIRMED_EXPOSURE_US = 5000000  # 3 seconds confirmed safe
+# Test your hardware with determine_max_exposure.py to find your limits
+MAX_SAFE_EXPOSURE_US = 5000000  # 5 seconds - hardware maximum (test your hardware!)
+MAX_RECOMMENDED_EXPOSURE_US = 3000000  # 3 seconds - recommended safe limit
 import sys
 from erle import encode, encode_8bit
 

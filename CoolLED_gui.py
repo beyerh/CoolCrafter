@@ -28,20 +28,20 @@ CHANNEL_WAVELENGTHS = {
     'A': {
         '365nm': {'wavelength': 365, 'color': '#8B00FF', 'name': '365nm UV'},
         '385nm': {'wavelength': 385, 'color': '#9370DB', 'name': '385nm UV'},
-        '395nm': {'wavelength': 395, 'color': '#A070E0', 'name': '395nm UV'},
-        '405nm': {'wavelength': 405, 'color': '#7B00E0', 'name': '405nm Violet'}
+        '405nm': {'wavelength': 405, 'color': '#7B00E0', 'name': '405nm Violet'},
+        '435nm': {'wavelength': 435, 'color': '#5F00D0', 'name': '435nm Violet'}
     },
     'B': {
-        '425nm': {'wavelength': 425, 'color': '#5F00D0', 'name': '425nm Violet'},
-        '445nm': {'wavelength': 445, 'color': '#4600FF', 'name': '445nm Blue'},
         '460nm': {'wavelength': 460, 'color': '#0050FF', 'name': '460nm Blue'},
-        '470nm': {'wavelength': 470, 'color': '#0060FF', 'name': '470nm Blue'}
+        '470nm': {'wavelength': 470, 'color': '#0060FF', 'name': '470nm Blue'},
+        '490nm': {'wavelength': 490, 'color': '#00A0FF', 'name': '490nm Cyan-Blue'},
+        '500nm': {'wavelength': 500, 'color': '#00B0B0', 'name': '500nm Cyan'}
     },
     'C': {
-        '500nm': {'wavelength': 500, 'color': '#00B0B0', 'name': '500nm Cyan'},
         '525nm': {'wavelength': 525, 'color': '#00FF00', 'name': '525nm Green'},
         '550nm': {'wavelength': 550, 'color': '#80FF00', 'name': '550nm Green'},
-        '575nm': {'wavelength': 575, 'color': '#FFD000', 'name': '575nm Yellow'}
+        '580nm': {'wavelength': 580, 'color': '#FFD700', 'name': '580nm Yellow'},
+        '595nm': {'wavelength': 595, 'color': '#FFA500', 'name': '595nm Amber'}
     },
     'D': {
         '635nm': {'wavelength': 635, 'color': '#FF0000', 'name': '635nm Red'},
@@ -66,19 +66,28 @@ class CoolLEDController:
             # Try both common baud rates
             for baud in [57600, 38400]:
                 try:
-                    self.serial = serial.Serial(self.port, baud, timeout=0.5)
-                    time.sleep(0.1)  # Allow connection to stabilize
+                    self.serial = serial.Serial(self.port, baud, timeout=1.0)
+                    time.sleep(0.2)  # Allow connection to stabilize
+                    
+                    # Clear any buffered data
+                    self.serial.reset_input_buffer()
+                    self.serial.reset_output_buffer()
                     
                     # Verify connection
                     version = self.get_version()
-                    if version:
+                    if version and len(version) > 0:
                         self.connected = True
                         # Query available wavelengths
                         self.query_available_wavelengths()
-                        return True, f"{version} @ {baud} baud"
+                        # Extract just the firmware version number
+                        fw_version = "Unknown"
+                        if 'XFW_VER=' in version:
+                            fw_version = version.split('XFW_VER=')[1].split('\r')[0].split('\n')[0]
+                        return True, f"FW v{fw_version} @ {baud} baud"
                     self.serial.close()
-                except:
-                    if self.serial:
+                except Exception as ex:
+                    print(f"Connection attempt failed on {self.port} @ {baud}: {ex}")
+                    if self.serial and self.serial.is_open:
                         self.serial.close()
                     continue
             
@@ -97,7 +106,7 @@ class CoolLEDController:
     
     def send_command(self, command):
         """Send command and return response"""
-        if not self.serial or not self.connected:
+        if not self.serial:
             return None
         try:
             # Use \r terminator for pE-4000
@@ -111,8 +120,16 @@ class CoolLEDController:
     
     def get_version(self):
         """Query firmware version"""
-        response = self.send_command("XVER")
-        return response
+        try:
+            # Send XVER command
+            self.serial.write(b"XVER\r")
+            time.sleep(0.2)
+            # Read multiple lines since response has multiple lines
+            response = self.serial.read(200).decode('utf-8', errors='ignore').strip()
+            return response
+        except Exception as e:
+            print(f"get_version error: {e}")
+            return None
     
     def query_available_wavelengths(self):
         """Query all available wavelengths"""
@@ -182,6 +199,21 @@ class CoolLEDController:
         """Find connected CoolLED devices"""
         devices = []
         
+        # First, try using serial.tools.list_ports to find CoolLED devices
+        try:
+            ports_info = list(serial.tools.list_ports.comports())
+            for port_info in ports_info:
+                # Check if description contains "CoolLED"
+                if "CoolLED" in port_info.description or "CoolLED" in str(port_info.manufacturer):
+                    print(f"Found CoolLED device: {port_info.device} - {port_info.description}")
+                    devices.append(port_info.device)
+            
+            if devices:
+                return devices
+        except Exception as e:
+            print(f"Error using list_ports: {e}")
+        
+        # Fallback: scan all ports
         if sys.platform.startswith('win'):
             ports = [f'COM{i+1}' for i in range(20)]
         elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
@@ -192,28 +224,34 @@ class CoolLEDController:
             return devices
         
         for port in ports:
-            try:
-                ser = serial.Serial(port, 38400, timeout=0.5)
-                time.sleep(0.1)
-                
-                # Try reading initial response
-                initial = ser.readline()
-                if b'CoolLED' in initial:
-                    devices.append(port)
+            # Try both common baud rates
+            for baud in [57600, 38400]:
+                try:
+                    ser = serial.Serial(port, baud, timeout=0.5)
+                    time.sleep(0.1)
+                    
+                    # Try reading initial response
+                    initial = ser.readline()
+                    if b'CoolLED' in initial:
+                        devices.append(port)
+                        ser.close()
+                        break
+                    
+                    # Try XVER command with correct terminator
+                    ser.write(b'XVER\r')
+                    time.sleep(0.2)
+                    response = ser.read(200)
+                    
+                    if b'XFW_VER' in response or b'XUNIT' in response:
+                        devices.append(port)
+                        ser.close()
+                        break
+                    
                     ser.close()
+                except (OSError, serial.SerialException):
+                    if 'ser' in locals() and ser and ser.is_open:
+                        ser.close()
                     continue
-                
-                # Try XVER command
-                ser.write(b'XVER\n')
-                time.sleep(0.1)
-                response = ser.read(200)
-                
-                if b'XFW_VER' in response or b'XUNIT' in response:
-                    devices.append(port)
-                
-                ser.close()
-            except (OSError, serial.SerialException):
-                pass
         
         return devices
 
@@ -247,6 +285,7 @@ class CoolLEDGUI:
         self.intensity_sliders = {}
         self.wavelength_combos = {}
         self.intensity_labels = {}
+        self.intensity_entries = {}
         
         # Sequence management
         self.sequence_steps = []
@@ -379,6 +418,7 @@ class CoolLEDGUI:
         intensity_entry.grid(row=0, column=3, sticky=tk.W, padx=5)
         intensity_entry.bind('<Return>', lambda e, ch=channel: self.on_intensity_entry(ch))
         intensity_entry.bind('<FocusOut>', lambda e, ch=channel: self.on_intensity_entry(ch))
+        self.intensity_entries[channel] = intensity_entry
         
         # Column 4: ON/OFF toggle buttons
         button_frame = ttk.Frame(frame)
@@ -479,7 +519,7 @@ class CoolLEDGUI:
         if success:
             self.connected = True
             self.status_label.config(text="● Connected", foreground="green")
-            self.device_info_label.config(text=f"Port: {port} | {message}")
+            self.device_info_label.config(text=f"{port} | {message}")
             self.connect_btn.config(state=tk.DISABLED)
             self.disconnect_btn.config(state=tk.NORMAL)
             self.enable_controls()
@@ -534,6 +574,7 @@ class CoolLEDGUI:
             self.channel_off_buttons[channel].config(state=tk.NORMAL)
             self.intensity_sliders[channel].config(state=tk.NORMAL)
             self.wavelength_combos[channel].config(state='readonly')
+            self.intensity_entries[channel].config(state=tk.NORMAL)
     
     def disable_controls(self):
         """Disable all channel controls"""
@@ -542,6 +583,7 @@ class CoolLEDGUI:
             self.channel_off_buttons[channel].config(state=tk.DISABLED)
             self.intensity_sliders[channel].config(state=tk.DISABLED)
             self.wavelength_combos[channel].config(state=tk.DISABLED)
+            self.intensity_entries[channel].config(state=tk.DISABLED)
             self.channel_status_labels[channel].config(text="OFF", foreground="gray")
     
     def turn_channel_on(self, channel):
