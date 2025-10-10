@@ -60,14 +60,22 @@ class ImageItem:
         thumb_mirrored = thumb.transpose(Image.FLIP_LEFT_RIGHT)
         self.thumbnail_mirrored = ImageTk.PhotoImage(thumb_mirrored)
 
+# Version info
+VERSION = "0.1"
+APP_NAME = "Pycrafter6500-8bit"
+GITHUB_URL = "https://github.com/beyerh/CoolCrafter"
+
 class DMDControllerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Pycrafter6500-8bit Controller")
-        self.root.geometry("1400x1000")
+        self.root.title(f"{APP_NAME} Controller v{VERSION}")
+        self.root.geometry("1400x840")
         
         # Apply professional theme
         self.apply_theme()
+        
+        # Create menu bar
+        self.create_menu()
         
         self.dlp = None
         self.connected = False
@@ -82,6 +90,71 @@ class DMDControllerGUI:
         self.projection_total_time = None
         self.timer_update_id = None
         self.create_ui()
+    
+    def create_menu(self):
+        """Create menu bar with File and Help menus"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+    
+    def show_about(self):
+        """Show About dialog with credits and version info"""
+        about_window = tk.Toplevel(self.root)
+        about_window.title(f"About {APP_NAME}")
+        about_window.geometry("500x400")
+        about_window.resizable(False, False)
+        about_window.transient(self.root)
+        about_window.grab_set()
+        
+        # Center the window
+        about_window.update_idletasks()
+        x = (about_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (about_window.winfo_screenheight() // 2) - (400 // 2)
+        about_window.geometry(f"500x400+{x}+{y}")
+        
+        # Content frame
+        content = ttk.Frame(about_window, padding="20")
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # App name and version
+        ttk.Label(content, text=APP_NAME, font=('TkDefaultFont', 18, 'bold')).pack(pady=(0, 5))
+        ttk.Label(content, text=f"Version {VERSION}", font=('TkDefaultFont', 12)).pack(pady=(0, 20))
+        
+        # Description
+        desc_text = "DMD controller for\nTexas Instruments DLP LightCrafter 6500"
+        ttk.Label(content, text=desc_text, font=('TkDefaultFont', 10), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # Credits
+        ttk.Label(content, text="Credits", font=('TkDefaultFont', 12, 'bold')).pack(pady=(10, 5))
+        credits_text = (
+            "Based on Pycrafter6500 with 8-bit support from uPatternScope\n"
+            "ERLE encoding for image compression\n\n"
+            "See GitHub for detailed references and citations"
+        )
+        ttk.Label(content, text=credits_text, font=('TkDefaultFont', 8), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # GitHub link
+        ttk.Label(content, text="GitHub Repository:", font=('TkDefaultFont', 10, 'bold')).pack(pady=(10, 5))
+        github_label = ttk.Label(content, text=GITHUB_URL, font=('TkDefaultFont', 9), foreground='blue', cursor='hand2')
+        github_label.pack()
+        github_label.bind("<Button-1>", lambda e: self.open_url(GITHUB_URL))
+        
+        # Close button
+        ttk.Button(content, text="Close", command=about_window.destroy).pack(pady=(20, 0))
+    
+    def open_url(self, url):
+        """Open URL in default browser"""
+        import webbrowser
+        webbrowser.open(url)
     
     def apply_theme(self):
         """Apply additional styling tweaks for the arc theme"""
@@ -331,7 +404,7 @@ class DMDControllerGUI:
         progress_inner = ttk.Frame(progress_frame)
         progress_inner.pack(fill=tk.BOTH, expand=True)
         
-        self.progress_text = tk.Text(progress_inner, height=8, wrap=tk.NONE, state=tk.DISABLED)
+        self.progress_text = tk.Text(progress_inner, height=6, wrap=tk.NONE, state=tk.DISABLED)
         self.progress_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Add scrollbars
@@ -354,9 +427,14 @@ class DMDControllerGUI:
     
     def on_closing(self):
         """Handle window close event gracefully"""
-        # Stop projection if running
+        # Warn if projection is running
         if self.projecting:
+            if not messagebox.askyesno("Projection Running", 
+                                       "A projection is currently running.\n\n"
+                                       "Do you want to stop it and close the application?"):
+                return  # User cancelled, don't close
             self.stop_projection()
+        
         # Disconnect from hardware if connected
         if self.connected and not self.demo_mode:
             try:

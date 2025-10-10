@@ -2,7 +2,7 @@
 
 **Designed for [uPatternScope](https://github.com/santkumar/uPatternScope)** - an optogenetic microscopy platform for spatiotemporal illumination control.
 
-Integrated control system for the **TI DLP LightCrafter 6500** (DMD) and **CoolLED pE-4000** (LED illumination). Provides synchronized projection and LED control for optogenetic experiments with precise spatial and temporal control.
+Integrated control system for the **TI DLP LightCrafter 6500** (DMD) and **CoolLED pE-4000** (LED illumination). Provides synchronized projection and LED control for optogenetic experiments with precise spatial and temporal control. Implemented with Claude Sonnet 4.5.
 
 **Built on:**
 - [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) - DMD control foundation

@@ -231,14 +231,22 @@ class ImageItem:
         thumb_mirrored = thumb.transpose(Image.FLIP_LEFT_RIGHT)
         self.thumbnail_mirrored = ImageTk.PhotoImage(thumb_mirrored)
 
+# Version info
+VERSION = "0.1"
+APP_NAME = "CoolCrafter"
+GITHUB_URL = "https://github.com/beyerh/CoolCrafter"
+
 class DMDControllerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Pycrafter6500-8bit Controller")
-        self.root.geometry("1400x920")  # Increased height to prevent cropping
+        self.root.title(f"{APP_NAME} v{VERSION} - DMD Controller")
+        self.root.geometry("1400x850")  # Optimized height
         
         # Apply professional theme
         self.apply_theme()
+        
+        # Create menu bar
+        self.create_menu()
         
         self.dlp = None
         self.connected = False
@@ -257,6 +265,72 @@ class DMDControllerGUI:
         self.projection_total_time = None
         self.timer_update_id = None
         self.create_ui()
+    
+    def create_menu(self):
+        """Create menu bar with File and Help menus"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+    
+    def show_about(self):
+        """Show About dialog with credits and version info"""
+        about_window = tk.Toplevel(self.root)
+        about_window.title(f"About {APP_NAME}")
+        about_window.geometry("500x400")
+        about_window.resizable(False, False)
+        about_window.transient(self.root)
+        about_window.grab_set()
+        
+        # Center the window
+        about_window.update_idletasks()
+        x = (about_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (about_window.winfo_screenheight() // 2) - (400 // 2)
+        about_window.geometry(f"500x400+{x}+{y}")
+        
+        # Content frame
+        content = ttk.Frame(about_window, padding="20")
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # App name and version
+        ttk.Label(content, text=APP_NAME, font=('TkDefaultFont', 18, 'bold')).pack(pady=(0, 5))
+        ttk.Label(content, text=f"Version {VERSION}", font=('TkDefaultFont', 12)).pack(pady=(0, 20))
+        
+        # Description
+        desc_text = "Integrated DMD and CoolLED controller for\nprecise spatial light modulation and illumination"
+        ttk.Label(content, text=desc_text, font=('TkDefaultFont', 10), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # Credits
+        ttk.Label(content, text="Credits", font=('TkDefaultFont', 12, 'bold')).pack(pady=(10, 5))
+        credits_text = (
+            "Based on Pycrafter6500 with 8-bit support from uPatternScope\n"
+            "CoolLED integration from CoolLED_control\n"
+            "ERLE encoding for image compression\n\n"
+            "See GitHub for detailed references and citations"
+        )
+        ttk.Label(content, text=credits_text, font=('TkDefaultFont', 8), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # GitHub link
+        ttk.Label(content, text="GitHub Repository:", font=('TkDefaultFont', 10, 'bold')).pack(pady=(10, 5))
+        github_label = ttk.Label(content, text=GITHUB_URL, font=('TkDefaultFont', 9), foreground='blue', cursor='hand2')
+        github_label.pack()
+        github_label.bind("<Button-1>", lambda e: self.open_url(GITHUB_URL))
+        
+        # Close button
+        ttk.Button(content, text="Close", command=about_window.destroy).pack(pady=(20, 0))
+    
+    def open_url(self, url):
+        """Open URL in default browser"""
+        import webbrowser
+        webbrowser.open(url)
     
     def apply_theme(self):
         """Apply additional styling tweaks for the arc theme"""
@@ -290,7 +364,7 @@ class DMDControllerGUI:
         # Left Panel (fixed width, no horizontal expansion)
         left_frame = ttk.LabelFrame(main_frame, text="System & Configuration", padding="10", width=280)
         left_frame.grid(row=0, column=0, sticky=(tk.N, tk.S), padx=(0, 5))
-        left_frame.grid_propagate(False)  # Prevent frame from shrinking
+        left_frame.pack_propagate(False)  # Prevent frame from shrinking (use pack_propagate since children use pack)
         
         # DMD Connection
         conn_frame = ttk.LabelFrame(left_frame, text="DMD Connection", padding="5")
@@ -477,12 +551,12 @@ class DMDControllerGUI:
         ttk.Separator(settings_inner, orient=tk.HORIZONTAL).grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
         ttk.Label(settings_inner, text="LED Illumination:", font=('TkDefaultFont', 9, 'bold')).grid(row=6, column=0, columnspan=2, sticky=tk.W)
         
+        # LED enabled automatically when any channel is selected (no checkbox needed)
         self.img_led_enabled_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(settings_inner, text="Enable LED", variable=self.img_led_enabled_var, command=self.on_image_setting_change).grid(row=7, column=0, columnspan=2, sticky=tk.W, pady=5)
         
         # Create 4 channel controls
         self.led_channel_vars = {}
-        row_start = 8
+        row_start = 7
         for i, channel in enumerate(['A', 'B', 'C', 'D']):
             channel_frame = ttk.Frame(settings_inner)
             channel_frame.grid(row=row_start+i, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
@@ -519,11 +593,10 @@ class DMDControllerGUI:
         self.led_mode_hint_label.grid(row=row_start+4, column=0, columnspan=2, sticky=tk.W)
         self.update_led_hint_label()
         
-        # Right Panel (fixed width, same as left - 280px)
-        right_frame = ttk.LabelFrame(main_frame, text="Projection Control", padding="10")
-        right_frame.grid(row=0, column=2, sticky=(tk.N, tk.S), padx=(5, 0))
-        right_frame.configure(width=280)
-        right_frame.grid_propagate(False)  # Maintain fixed width
+        # Right Panel (fixed width, spans both rows - match left panel width)
+        right_frame = ttk.LabelFrame(main_frame, text="Projection Control", padding="10", width=280)
+        right_frame.grid(row=0, column=2, rowspan=2, sticky=(tk.N, tk.S), padx=(5, 0))
+        right_frame.pack_propagate(False)  # Maintain fixed width (use pack_propagate since children use pack)
         
         status_frame = ttk.LabelFrame(right_frame, text="Status", padding="5")
         status_frame.pack(fill=tk.X, pady=(0, 10))
@@ -541,8 +614,6 @@ class DMDControllerGUI:
         self.stop_btn = ttk.Button(control_frame, text="⏹ Stop", command=self.stop_projection, state=tk.DISABLED)
         self.stop_btn.pack(fill=tk.X, pady=2)
         
-        # Sequence Info moved to bottom panel (next to progress log)
-        
         # Image Management (moved from left panel)
         img_mgmt_frame = ttk.LabelFrame(right_frame, text="Image Management", padding="5")
         img_mgmt_frame.pack(fill=tk.X, pady=(0, 10))
@@ -557,6 +628,13 @@ class DMDControllerGUI:
         
         ttk.Button(img_mgmt_frame, text="Clear All", command=self.clear_all_images).pack(fill=tk.X, pady=2)
         
+        # Sequence Info
+        info_frame = ttk.LabelFrame(right_frame, text="Sequence Info", padding="5")
+        info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.info_text = tk.Text(info_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
+        self.info_text.pack(fill=tk.BOTH, expand=True)
+        self.update_sequence_info()
+        
         # Global Settings (compact layout for slim panel)
         global_frame = ttk.LabelFrame(right_frame, text="Global Settings", padding="5")
         global_frame.pack(fill=tk.X, pady=(0, 10))
@@ -566,12 +644,12 @@ class DMDControllerGUI:
         ttk.Label(global_frame, text="Default Exposure (μs):").grid(row=1, column=0, sticky=tk.W, pady=2)
         self.default_exposure_var = tk.StringVar(value='4046')
         ttk.Entry(global_frame, textvariable=self.default_exposure_var, width=10).grid(row=1, column=1, sticky=tk.W, pady=2)
-        ttk.Label(global_frame, text="Max: 16,777,215 μs", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=0, columnspan=2, sticky=tk.W)
+        ttk.Label(global_frame, text="Max: 16,777,215 μs (≈16.8s)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=0, columnspan=2, sticky=tk.W)
         ttk.Button(global_frame, text="Apply to All", command=self.apply_default_mode).grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
         
-        # Bottom Panel: Progress Log (spans left and center columns)
+        # Bottom Panel: Progress Log (spans entire width - all 3 columns)
         progress_frame = ttk.LabelFrame(main_frame, text="Progress Log", padding="5")
-        progress_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(5, 0), padx=(0, 5))
+        progress_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(5, 0))
         
         # Create frame with scrollbar
         progress_inner = ttk.Frame(progress_frame)
@@ -589,15 +667,7 @@ class DMDControllerGUI:
         progress_hscroll.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress_text.configure(xscrollcommand=progress_hscroll.set)
         
-        # Sequence Info (right side, aligned with right panel above - 280px)
-        info_frame = ttk.LabelFrame(main_frame, text="Sequence Info", padding="5")
-        info_frame.grid(row=1, column=2, sticky=(tk.N, tk.S), pady=(5, 0), padx=(5, 0))
-        info_frame.configure(width=280)
-        info_frame.grid_propagate(False)  # Maintain fixed width
-        # Set width to ~30 characters to fit in 280px frame
-        self.info_text = tk.Text(info_frame, height=8, width=30, wrap=tk.WORD, state=tk.DISABLED)
-        self.info_text.pack(fill=tk.Y, expand=True)
-        self.update_sequence_info()
+        # Sequence Info now inside right panel (see above)
         
         # Show constant mode frame by default (since constant is the default mode)
         self.constant_frame.pack(fill=tk.X, pady=(0, 10))
@@ -610,9 +680,14 @@ class DMDControllerGUI:
     
     def on_closing(self):
         """Handle window close event gracefully"""
-        # Stop projection if running
+        # Warn if projection is running
         if self.projecting:
+            if not messagebox.askyesno("Projection Running", 
+                                       "A projection is currently running.\n\n"
+                                       "Do you want to stop it and close the application?"):
+                return  # User cancelled, don't close
             self.stop_projection()
+        
         # Disconnect from hardware if connected
         if self.connected and not self.demo_mode:
             try:
@@ -988,13 +1063,20 @@ class DMDControllerGUI:
             img.duration_unit = unit
             
             # Update LED settings
-            img.led_enabled = self.img_led_enabled_var.get()
+            # Auto-enable LED if any channel is enabled
+            any_channel_enabled = False
             for channel in ['A', 'B', 'C', 'D']:
                 img.led_channels[channel]['enabled'] = self.led_channel_vars[channel]['enabled'].get()
+                if self.led_channel_vars[channel]['enabled'].get():
+                    any_channel_enabled = True
                 if self.led_channel_vars[channel]['wavelength'].get():
                     img.led_channels[channel]['wavelength'] = int(self.led_channel_vars[channel]['wavelength'].get())
                 if self.led_channel_vars[channel]['intensity'].get():
                     img.led_channels[channel]['intensity'] = int(self.led_channel_vars[channel]['intensity'].get())
+            
+            # Automatically enable LED if any channel is selected
+            img.led_enabled = any_channel_enabled
+            self.img_led_enabled_var.set(any_channel_enabled)
             
             # Fix numpy array boolean check
             if img.image_array is not None:

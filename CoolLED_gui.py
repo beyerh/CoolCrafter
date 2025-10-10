@@ -165,8 +165,9 @@ class CoolLEDController:
             return True
     
     def turn_off(self, channel):
-        """Turn channel OFF"""
-        response = self.send_command(f"CSS{channel}SF")
+        """Turn channel OFF by setting intensity to 0"""
+        # Set intensity to 0 to turn off the specific channel
+        response = self.send_command(f"CSS{channel}SN000")
         return True
     
     def get_status(self):
@@ -256,29 +257,39 @@ class CoolLEDController:
         return devices
 
 
+# Version info
+VERSION = "0.1"
+APP_NAME = "CoolLED pE-4000 Controller"
+GITHUB_URL = "https://github.com/beyerh/CoolCrafter"
+
 class CoolLEDGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("CoolLED pE-4000 Controller")
+        self.root.title(f"{APP_NAME} v{VERSION}")
         self.root.geometry("1100x700")
         
         # Apply professional theme
         self.apply_theme()
+        
+        # Create menu bar
+        self.create_menu()
         
         self.controller = None
         self.connected = False
         self.demo_mode = False
         
         # Channel states (for demo mode) and configuration
+        # Initialize with first wavelength in each channel for clarity
         self.channel_states = {
-            'A': {'on': False, 'intensity': 50, 'wavelength': '365nm'},
-            'B': {'on': False, 'intensity': 50, 'wavelength': '470nm'},
-            'C': {'on': False, 'intensity': 50, 'wavelength': '525nm'},
-            'D': {'on': False, 'intensity': 50, 'wavelength': '635nm'}
+            'A': {'on': False, 'intensity': 50, 'wavelength': '365nm'},  # First in A
+            'B': {'on': False, 'intensity': 50, 'wavelength': '460nm'},  # First in B
+            'C': {'on': False, 'intensity': 50, 'wavelength': '525nm'},  # First in C
+            'D': {'on': False, 'intensity': 50, 'wavelength': '635nm'}   # First in D
         }
         
-        # Channel intensity variables
+        # Channel control variables
         self.intensity_vars = {}
+        self.wavelength_vars = {}  # Store StringVars for wavelength combos
         self.channel_status_labels = {}
         self.channel_on_buttons = {}
         self.channel_off_buttons = {}
@@ -297,6 +308,71 @@ class CoolLEDGUI:
         
         # Set up proper window close handler
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def create_menu(self):
+        """Create menu bar with File and Help menus"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+    
+    def show_about(self):
+        """Show About dialog with credits and version info"""
+        about_window = tk.Toplevel(self.root)
+        about_window.title(f"About {APP_NAME}")
+        about_window.geometry("500x400")
+        about_window.resizable(False, False)
+        about_window.transient(self.root)
+        about_window.grab_set()
+        
+        # Center the window
+        about_window.update_idletasks()
+        x = (about_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (about_window.winfo_screenheight() // 2) - (400 // 2)
+        about_window.geometry(f"500x400+{x}+{y}")
+        
+        # Content frame
+        content = ttk.Frame(about_window, padding="20")
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # App name and version
+        ttk.Label(content, text="CoolLED Controller", font=('TkDefaultFont', 18, 'bold')).pack(pady=(0, 5))
+        ttk.Label(content, text=f"Version {VERSION}", font=('TkDefaultFont', 12)).pack(pady=(0, 20))
+        
+        # Description
+        desc_text = "Controller for\nCoolLED pE-4000 LED Illumination System"
+        ttk.Label(content, text=desc_text, font=('TkDefaultFont', 10), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # Credits
+        ttk.Label(content, text="Credits", font=('TkDefaultFont', 12, 'bold')).pack(pady=(10, 5))
+        credits_text = (
+            "Based on CoolLED_control by philglock\n"
+            "Supports 4 channels with 16 wavelengths (365-770nm)\n\n"
+            "See GitHub for detailed references and citations"
+        )
+        ttk.Label(content, text=credits_text, font=('TkDefaultFont', 8), justify=tk.CENTER).pack(pady=(0, 20))
+        
+        # GitHub link
+        ttk.Label(content, text="GitHub Repository:", font=('TkDefaultFont', 10, 'bold')).pack(pady=(10, 5))
+        github_label = ttk.Label(content, text=GITHUB_URL, font=('TkDefaultFont', 9), foreground='blue', cursor='hand2')
+        github_label.pack()
+        github_label.bind("<Button-1>", lambda e: self.open_url(GITHUB_URL))
+        
+        # Close button
+        ttk.Button(content, text="Close", command=about_window.destroy).pack(pady=(20, 0))
+    
+    def open_url(self, url):
+        """Open URL in default browser"""
+        import webbrowser
+        webbrowser.open(url)
     
     def apply_theme(self):
         """Apply styling tweaks"""
@@ -394,8 +470,8 @@ class CoolLEDGUI:
         
         # Column 1: Wavelength selector (compact)
         available = list(CHANNEL_WAVELENGTHS[channel].keys())
-        wavelength_var = tk.StringVar(value=wavelength_key)
-        wavelength_combo = ttk.Combobox(frame, textvariable=wavelength_var, 
+        self.wavelength_vars[channel] = tk.StringVar(value=wavelength_key)
+        wavelength_combo = ttk.Combobox(frame, textvariable=self.wavelength_vars[channel], 
                                        values=available, 
                                        state='readonly', width=8)
         wavelength_combo.grid(row=0, column=1, sticky=tk.W, padx=5)
@@ -425,12 +501,12 @@ class CoolLEDGUI:
         button_frame.grid(row=0, column=4, sticky=tk.W, padx=(5, 0))
         
         on_btn = ttk.Button(button_frame, text="ON", width=5,
-                           command=lambda: self.turn_channel_on(channel))
+                           command=lambda ch=channel: self.turn_channel_on(ch))
         on_btn.pack(side=tk.LEFT, padx=2)
         self.channel_on_buttons[channel] = on_btn
         
         off_btn = ttk.Button(button_frame, text="OFF", width=5,
-                            command=lambda: self.turn_channel_off(channel))
+                            command=lambda ch=channel: self.turn_channel_off(ch))
         off_btn.pack(side=tk.LEFT, padx=2)
         self.channel_off_buttons[channel] = off_btn
         
@@ -478,12 +554,26 @@ class CoolLEDGUI:
             pass
     
     def on_closing(self):
-        """Handle window close event"""
+        """Handle window close event gracefully"""
+        # Warn if sequence is running
+        if self.sequence_running:
+            if not messagebox.askyesno("Sequence Running", 
+                                       "A sequence is currently running.\n\n"
+                                       "Do you want to stop it and close the application?"):
+                return  # User cancelled, don't close
+            self.stop_sequence()
+            # Wait briefly for sequence thread to finish
+            if self.sequence_thread and self.sequence_thread.is_alive():
+                self.sequence_thread.join(timeout=1.0)
+        
+        # Disconnect from hardware if connected
         if self.connected and not self.demo_mode:
             try:
                 self.disconnect_device()
             except:
                 pass
+        
+        # Close the window
         self.root.destroy()
     
     def connect_device(self):
@@ -523,8 +613,8 @@ class CoolLEDGUI:
             self.connect_btn.config(state=tk.DISABLED)
             self.disconnect_btn.config(state=tk.NORMAL)
             self.enable_controls()
-            # Query initial intensities
-            self.refresh_all_intensities()
+            # Note: CoolLED doesn't support reading back intensity values
+            # GUI uses default values (50%) set during initialization
         else:
             pass  # Connection failed
             messagebox.showerror("Connection Error", f"Could not connect:\n{message}")
@@ -630,23 +720,26 @@ class CoolLEDGUI:
                 self.controller.set_intensity(channel, intensity)
     
     def all_channels_on(self):
-        """Turn all channels ON"""
+        """Turn all channels ON with current intensity settings"""
         if self.demo_mode:
             for channel in ['A', 'B', 'C', 'D']:
                 self.channel_states[channel]['on'] = True
                 self.channel_status_labels[channel].config(text="ON", foreground="green")
             pass  # All channels on
         elif self.controller:
-            if self.controller.all_on():
-                for channel in ['A', 'B', 'C', 'D']:
-                    self.channel_states[channel]['on'] = True
-                    self.channel_status_labels[channel].config(text="ON", foreground="green")
-                pass  # All channels on
-            else:
-                for channel in ['A', 'B', 'C', 'D']:
-                    self.channel_states[channel]['on'] = False
-                    self.channel_status_labels[channel].config(text="OFF", foreground="gray")
-                pass  # Failed to turn on all
+            # Turn on each channel individually with its current intensity
+            # This ensures channels that were turned off (intensity=0) get turned back on
+            for channel in ['A', 'B', 'C', 'D']:
+                intensity = self.intensity_vars[channel].get()
+                wavelength_key = self.wavelength_vars[channel].get()
+                wavelength_nm = CHANNEL_WAVELENGTHS[channel][wavelength_key]['wavelength']
+                
+                # Load wavelength and set intensity
+                self.controller.load_wavelength(wavelength_nm)
+                self.controller.set_intensity(channel, intensity)
+                
+                self.channel_states[channel]['on'] = True
+                self.channel_status_labels[channel].config(text="ON", foreground="green")
     
     def all_channels_off(self):
         """Turn all channels OFF"""
@@ -689,12 +782,10 @@ class CoolLEDGUI:
     
     def refresh_all_intensities(self):
         """Query and update all channel intensities from hardware"""
-        if not self.controller or self.demo_mode:
-            return
-        for channel in ['A', 'B', 'C', 'D']:
-            intensity = self.controller.get_intensity(channel)
-            if intensity is not None:
-                self.intensity_vars[channel].set(intensity)
+        # Note: CoolLED pE-4000 doesn't support reading back intensity values
+        # The GUI maintains state locally with default values (50%)
+        # This method is kept for compatibility but does nothing
+        pass
     
     # ==================== SEQUENCE EDITOR METHODS ====================
     
@@ -1120,7 +1211,7 @@ class PatternGeneratorDialog:
         self.main_app = main_app
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Pattern Generator")
-        self.dialog.geometry("700x600")
+        self.dialog.geometry("700x750")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
