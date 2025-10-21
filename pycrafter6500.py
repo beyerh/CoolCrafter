@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 ## @package pycrafter6500
-#  Python package for the lightcrafter 6500
+#  Python package for TI DLP6500FYE DMD (housed in DLPLCR65EVM) with DLPLCRC900EVM controller
 
 import usb.core
 import usb.util

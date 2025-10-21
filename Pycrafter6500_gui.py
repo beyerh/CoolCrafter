@@ -130,7 +130,7 @@ class DMDControllerGUI:
         ttk.Label(content, text=f"Version {VERSION}", font=('TkDefaultFont', 12)).pack(pady=(0, 20))
         
         # Description
-        desc_text = "DMD controller for\nTexas Instruments DLP LightCrafter 6500"
+        desc_text = "DMD controller for\nTI DLP6500FYE (0.65\", 1920×1080)\nhoused in DLPLCR65EVM with DLPLCRC900EVM controller"
         ttk.Label(content, text=desc_text, font=('TkDefaultFont', 10), justify=tk.CENTER).pack(pady=(0, 20))
         
         # Credits
