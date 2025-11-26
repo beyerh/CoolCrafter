@@ -20,12 +20,12 @@ Follow the on-screen prompts. The script will:
 
 ## What to Watch For
 
-### ✅ WORKING Exposure
+### WORKING Exposure
 - Pattern stays **bright white** for the full test duration
 - Example: 3-second test → pattern visible for full 3 seconds
 - Pattern goes dark only after the specified time
 
-### ❌ FAILING Exposure
+### FAILING Exposure
 - Pattern goes **dark early** (typically after 1-3 seconds)
 - Example: 10-second test → pattern dark after 3 seconds
 - Much shorter than the specified time
@@ -52,7 +52,7 @@ For each test:
 ### Step 4: Record Results
 The script will show:
 ```
-✅ CONFIRMED MAXIMUM: 5,000,000 μs (5.0 seconds)
+CONFIRMED MAXIMUM: 5,000,000 μs (5.0 seconds)
 
 RECOMMENDED CONFIGURATION VALUES
 Based on your hardware test results:
@@ -66,9 +66,33 @@ The script provides exact code snippets to copy-paste.
 
 ## Updating Configuration Values
 
-**Only one file needs to be updated** - all GUI applications import these values from `pycrafter6500.py`.
+You can update the exposure limits in two ways:
 
-### File: pycrafter6500.py
+### Method 1: GUI Settings (Recommended)
+
+**The easiest way** to configure your hardware-specific exposure limits:
+
+1. Launch **CoolCrafter_gui.py**
+2. Go to **Edit → Settings** (or press Ctrl+,)
+3. Under **Exposure Limits**, adjust:
+   - **Max safe exposure**: Your hardware's absolute maximum (in microseconds)
+   - **Max recommended**: Conservative safe limit (typically 80% of max)
+4. Click **Save**
+
+**Example values** (based on 5-second hardware maximum):
+- Max safe exposure: `5000000` (5.0 seconds)
+- Max recommended: `4000000` (4.0 seconds)
+
+The GUI will automatically validate and save these values. They will be used for:
+- Upload validation warnings and errors
+- Sequence planning recommendations
+- Runtime exposure checking
+
+### Method 2: Edit Configuration File (Alternative)
+
+If you prefer to set defaults in code or don't have access to the GUI:
+
+**File:** `pycrafter6500.py`
 
 **Location:** Near the top of the file (around line 13)
 
@@ -86,7 +110,7 @@ MAX_SAFE_EXPOSURE_US = YOUR_MAX_HERE  # Your hardware maximum (e.g., 5000000)
 MAX_RECOMMENDED_EXPOSURE_US = YOUR_SAFE_HERE  # Recommended limit (e.g., 4000000 = 80% of max)
 ```
 
-**That's it!** All GUI applications (CoolCrafter_gui.py, Pycrafter6500_gui.py) will automatically use the updated values.
+**Note:** Values set in the GUI settings will override these defaults.
 
 ## Example Results
 
@@ -103,8 +127,12 @@ MAX_RECOMMENDED_EXPOSURE_US = YOUR_SAFE_HERE  # Recommended limit (e.g., 4000000
 **Configuration:**
 ```python
 MAX_SAFE_EXPOSURE_US = 3000000  # 3.0 seconds
-MAX_CONFIRMED_EXPOSURE_US = 2400000  # 2.4 seconds (80% of max)
+MAX_RECOMMENDED_EXPOSURE_US = 2400000  # 2.4 seconds (80% of max)
 ```
+
+**Or via GUI Settings:**
+- Max safe exposure: `3000000`
+- Max recommended: `2400000`
 
 ### Example 2: Better Hardware (5-second max)
 
@@ -121,8 +149,12 @@ MAX_CONFIRMED_EXPOSURE_US = 2400000  # 2.4 seconds (80% of max)
 **Configuration:**
 ```python
 MAX_SAFE_EXPOSURE_US = 5000000  # 5.0 seconds
-MAX_CONFIRMED_EXPOSURE_US = 4000000  # 4.0 seconds (80% of max)
+MAX_RECOMMENDED_EXPOSURE_US = 4000000  # 4.0 seconds (80% of max)
 ```
+
+**Or via GUI Settings:**
+- Max safe exposure: `5000000`
+- Max recommended: `4000000`
 
 ## Understanding the Values
 
@@ -132,11 +164,12 @@ MAX_CONFIRMED_EXPOSURE_US = 4000000  # 4.0 seconds (80% of max)
 - **GUI behavior:** Shows ERROR and blocks projection if exceeded
 - **Use case:** Hard limit - never exceed this
 
-### MAX_CONFIRMED_EXPOSURE_US (or MAX_RECOMMENDED_EXPOSURE_US)
+### MAX_RECOMMENDED_EXPOSURE_US
 - **What it is:** Conservative safe limit (typically 80% of max)
 - **Purpose:** Provides safety margin for reliability
 - **GUI behavior:** Shows WARNING (allows continuation)
 - **Use case:** Recommended maximum for production use
+- **Configuration:** Can be set via GUI Settings or in `pycrafter6500.py`
 
 ## Troubleshooting
 

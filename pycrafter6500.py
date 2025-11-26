@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 ## @package pycrafter6500
-#  Python package for TI DLP6500FYE DMD (housed in DLPLCR65EVM) with DLPLCRC900EVM controller
+#  Python package for the lightcrafter 6500
 
 import usb.core
 import usb.util
@@ -48,6 +48,11 @@ class dmd():
         self.dev.set_configuration()
 
         self.ans=[]
+        
+        # USB timeout in milliseconds (60 seconds for large 8-bit uploads)
+        # Default is usually 1000ms (1 sec) which is too short for large patterns
+        # 60s is needed because DMD needs time to process large compressed images
+        self.usb_timeout = 60000
 
 ## standard usb command function
 
@@ -77,13 +82,13 @@ class dmd():
                 buffer.append(0x00)
 
 
-            self.dev.write(1, buffer)
+            self.dev.write(1, buffer, self.usb_timeout)
 
         else:
             for i in range(64-len(buffer)):
                 buffer.append(data[i])
 
-            self.dev.write(1, buffer)
+            self.dev.write(1, buffer, self.usb_timeout)
 
             buffer = []
 
@@ -92,7 +97,7 @@ class dmd():
                 buffer.append(data[j+58])
                 j=j+1
                 if j%64==0:
-                    self.dev.write(1, buffer)
+                    self.dev.write(1, buffer, self.usb_timeout)
 
                     buffer = []
 
@@ -103,21 +108,26 @@ class dmd():
                     j=j+1
 
 
-                self.dev.write(1, buffer)                
+                self.dev.write(1, buffer, self.usb_timeout)                
                 
 
 
 
 
-
-        self.ans=self.dev.read(0x81,64)
+        self.ans=self.dev.read(0x81, 64, self.usb_timeout)
 
 ## functions for checking error reports in the dlp answer
 
     def checkforerrors(self):
         self.command('r',0x22,0x01,0x00,[])
         if self.ans[6]!=0:
-            print (self.ans[6])    
+            error_code = self.ans[6]
+            error_msg = f"DMD Error Code: {error_code} (0x{error_code:02X})"
+            print(f"ERROR: {error_msg}")
+            # Uncomment to raise exception on errors:
+            # raise RuntimeError(error_msg)
+            return error_code
+        return 0    
 
 ## function printing all of the dlp answer
 
@@ -166,21 +176,18 @@ class dmd():
         self.checkforerrors()
 
     def startsequence(self):
-        # CRITICAL: Set all pattern configuration just before starting
-        # Setting these too early may cause them to be reset during pattern upload
+        """Start DMD pattern sequence playback"""
+        import time
         
-        # 1. Set Display Mode to Pattern On-The-Fly (3)
-        self.command('w',0x00,0x1a,0x1b,[3])
-        self.checkforerrors()
-        
-        # 2. Set Pattern Display Data Input Source to Streaming (0x00)
+        # Set Input Source to Streaming (required for Pattern OTF)
         self.command('w',0x00,0x1a,0x22,[0x00])
         self.checkforerrors()
         
-        # 3. Set Pattern Trigger Mode to Internal (0x00)
+        # Set Trigger Mode to Internal (patterns advance automatically)
         self.command('w',0x00,0x1a,0x23,[0x00])
         self.checkforerrors()
         
+        # Start sequence playback
         self.command('w',0x00,0x1a,0x24,[2])
         self.checkforerrors()
 
@@ -189,8 +196,11 @@ class dmd():
         self.checkforerrors()
 
     def stopsequence(self):
+        """Stop DMD pattern sequence playback"""
+        import time
         self.command('w',0x00,0x1a,0x24,[0])
         self.checkforerrors()
+        time.sleep(0.15)  # Wait for DMD to clear buffers
 
 
     def configurelut(self,imgnum,repeatnum):
@@ -201,11 +211,8 @@ class dmd():
 
         bytes=bitstobytes(string)
 
+        # Configure LUT (no validation needed per DLPC900 reference implementations)
         self.command('w',0x00,0x1a,0x31,bytes)
-        self.checkforerrors()
-        
-        # CRITICAL: Validate LUT (0x1A1A) - activates patterns
-        self.command('w',0x00,0x1a,0x1a,[0x00])
         self.checkforerrors()
         
 
@@ -277,136 +284,279 @@ class dmd():
 ## max  hid package size=64, flag bytes=4, usb command bytes=2
 ## size of package description bytes=2. 64-4-2-2=56
 
-    def bmpload(self,image,size):
-
-        packnum=size//504+1
-
-        counter=0
-
+    def bmpload(self, image, size, progress_msg="", progress_callback=None):
+        """Load compressed BMP data to DMD with progress feedback.
+        
+        Args:
+            image: Compressed image data
+            size: Size of compressed image
+            progress_msg: Optional message prefix for progress updates
+            progress_callback: Optional callback function(message) for GUI updates
+        """
+        packnum = size // 504 + 1
+        counter = 0
+        
+        # Progress reporting every 10% or every 50 packets (whichever is more frequent)
+        report_interval = max(1, min(50, packnum // 10))
+        
         for i in range(packnum):
-            if i %100==0:
-                print (i,packnum)
-            payload=[]
-            if i<packnum-1:
-                leng=convlen(504,16)
-                bits=504
+            # Progress feedback
+            if i % report_interval == 0 or i == packnum - 1:
+                percent = int((i + 1) * 100 / packnum)
+                msg = f"  {progress_msg}Progress: {percent}% ({i+1}/{packnum} packets)"
+                if progress_callback:
+                    progress_callback(msg)
+                else:
+                    print(msg)
+            
+            payload = []
+            if i < packnum - 1:
+                leng = convlen(504, 16)
+                bits = 504
             else:
-                leng=convlen(size%504,16)
-                bits=size%504
-            leng=bitstobytes(leng)
+                leng = convlen(size % 504, 16)
+                bits = size % 504
+            leng = bitstobytes(leng)
             for j in range(2):
                 payload.append(leng[j])
             for j in range(bits):
                 payload.append(image[counter])
-                counter+=1
-            self.command('w',0x11,0x1a,0x2b,payload)
+                counter += 1
+            
+            try:
+                self.command('w', 0x11, 0x1a, 0x2b, payload)
+                
+                # Skip error check on last packet - DMD is busy processing and won't respond
+                if i < packnum - 1:
+                    self.checkforerrors()
+                else:
+                    # Last packet - give DMD time to process without checking
+                    import time
+                    time.sleep(2.0)
+                    
+            except Exception as e:
+                msg = f"  ERROR at packet {i+1}/{packnum}: {e}"
+                if progress_callback:
+                    progress_callback(msg)
+                else:
+                    print(msg)
+                raise
 
 
-            self.checkforerrors()
-
-
-    def defsequence(self,images,exp,ti,dt,to,rep):
-        
-        # CRITICAL: Must be in Pattern On-The-Fly mode to define patterns
-        self.command('w',0x00,0x1a,0x1b,[3])
-        self.checkforerrors()
-
-        self.stopsequence()
-
-        arr=[]
-
-        for i in images:
-            arr.append(i)
-
-##        arr.append(numpy.ones((1080,1920),dtype='uint8'))
-
-        num=len(arr)
-
-        encodedimages=[]
-        sizes=[]
-
-        for i in range((num-1)//24+1):
-            print ('merging...')
-            if i<((num-1)//24):
-                imagedata=arr[i*24:(i+1)*24]
-            else:
-                imagedata=arr[i*24:]
-            print ('encoding...')
-            imagedata,size=encode(imagedata)
-
-            encodedimages.append(imagedata)
-            sizes.append(size)
-
-        # First upload all images
-        for i in range((num-1)//24+1):
-            self.setbmp((num-1)//24-i,sizes[(num-1)//24-i])
-            print ('uploading...')
-            self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
-
-        # THEN define patterns (after images are uploaded)
-        if num <= 24:
-            for j in range(num):
-                self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],0,j)
-        else:
-            if i<((num-1)//24):
-                for j in range(i*24,(i+1)*24):
-                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-            else:
-                for j in range(i*24,num):
-                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-
-        # Finally configure LUT
-        self.configurelut(num,rep)
-
-
-    def defsequence_8bit(self,images,exp,ti,dt,to,rep):
+    def defsequence(self, images, exp, ti, dt, to, rep, progress_callback=None):
         """
-        Define a sequence for 8-bit grayscale images.
+        Define a sequence for 1-bit patterns in Pattern On-The-Fly mode.
         
         Parameters:
-        - images: list of 8-bit grayscale numpy arrays (values 0-255)
-        - exp: list of exposure times in microseconds
-        - ti: list of trigger input flags
-        - dt: list of dark times in microseconds
-        - to: list of trigger output flags
-        - rep: number of repetitions (0 = infinite)
+        - images: List of 1-bit numpy arrays (values 0-1)
+        - exp: List of exposure times in microseconds for each pattern
+        - ti: List of trigger input flags (True/False)
+        - dt: List of dark times in microseconds for each pattern
+        - to: List of trigger output flags (0-3)
+        - rep: Number of sequence repetitions (0xFFFFFFFF for infinite)
         
-        Note: Currently supports 1 image at a time for 8-bit mode
+        Notes:
+        - Maximum of 400 patterns in 1-bit mode
+        - Patterns are processed in batches of 24
+        - Each pattern can have individual timing and trigger settings
         """
-        self.stopsequence()
+        if len(images) > 400:
+            raise ValueError("Maximum number of 1-bit patterns (400) exceeded")
+        if not all(len(lst) == len(images) for lst in [exp, ti, dt, to]):
+            raise ValueError("All input lists must have the same length as images list")
+        
+        import time
+        
+        # Required sequence for mode change (per DLPC900 reference implementations):
+        # Stop → Set Pattern OTF mode → Stop again
+        self.command('w',0x00,0x1a,0x24,[0])  # Stop before mode change
+        self.checkforerrors()
+        time.sleep(0.05)
+        
+        self.command('w',0x00,0x1a,0x1b,[3])  # Set Pattern On-The-Fly mode
+        self.checkforerrors()
+        time.sleep(0.05)
+        
+        self.command('w',0x00,0x1a,0x24,[0])  # Stop again after mode change
+        self.checkforerrors()
+        time.sleep(0.05)
 
-        arr=[]
-        for i in images:
-            arr.append(i)
+        num = len(images)
+        encodedimages = []
+        sizes = []
+        batch_size = 24  # Number of patterns per batch
 
-        num=len(arr)
-
-        encodedimages=[]
-        sizes=[]
-
-        # For 8-bit mode, encode each image individually (not batched)
-        for i in range(num):
-            print(f'encoding image {i+1}/{num}...')
-            # Encode single 8-bit image
-            imagedata, size = encode_8bit([arr[i]])
+        # Step 1: Encode all batches
+        msg = f'Encoding {num} patterns into {(num-1)//batch_size + 1} batches...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        for i in range(0, num, batch_size):
+            batch = images[i:i+batch_size]
+            batch_idx = i // batch_size
+            msg = f'  Encoding batch {batch_idx + 1}...'
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
             
+            # Encode batch of 1-bit patterns
+            imagedata, size = encode(batch)
             encodedimages.append(imagedata)
             sizes.append(size)
+        
+        # Step 2: Define all pattern parameters
+        msg = f'Defining {num} patterns...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        for i in range(0, num, batch_size):
+            batch_idx = i // batch_size
+            batch_len = min(batch_size, num - i)
             
-            # Define pattern with 8-bit depth
-            # patind=i (each image gets its own index)
-            # bitpos=0 (for 8-bit mode, DMD handles bit planes internally)
-            self.definepattern(i, exp[i], 8, '111', ti[i], dt[i], to[i], i, 0)
-
+            for j in range(batch_len):
+                pattern_idx = i + j
+                self.definepattern(
+                    pattern_idx,         # Global pattern index
+                    exp[pattern_idx],    # Exposure time
+                    1,                   # 1-bit depth
+                    '111',               # RGB color (white)
+                    ti[pattern_idx],     # Trigger in
+                    dt[pattern_idx],     # Dark time
+                    to[pattern_idx],     # Trigger out
+                    batch_idx,           # Batch index
+                    j                    # Pattern index within batch
+                )
+        
+        # Step 3: Configure LUT
         self.configurelut(num, rep)
+        
+        # Step 4: Upload images in reverse order (required by DLPC900)
+        num_batches = len(encodedimages)
+        msg = f'Uploading {num_batches} batches in reverse order...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        for idx, batch_idx in enumerate(reversed(range(num_batches))):
+            msg = f'  Batch {batch_idx} ({idx+1}/{num_batches})...'
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+            self.setbmp(batch_idx, sizes[batch_idx])
+            self.bmpload(encodedimages[batch_idx], sizes[batch_idx], 
+                        progress_msg=f"Batch {batch_idx}: ",
+                        progress_callback=progress_callback)
 
-        # Upload encoded images
+
+    def defsequence_8bit(self, images, exp, ti, dt, to, rep, progress_callback=None):
+        """
+        Define a sequence for 8-bit grayscale patterns in Pattern On-The-Fly mode.
+        
+        Parameters:
+        - images: List of 8-bit grayscale numpy arrays (values 0-255)
+        - exp: List of exposure times in microseconds for each pattern
+        - ti: List of trigger input flags (True/False)
+        - dt: List of dark times in microseconds for each pattern
+        - to: List of trigger output flags (0-3)
+        - rep: Number of sequence repetitions (0xFFFFFFFF for infinite)
+        
+        Notes:
+        - Maximum of 25 patterns in 8-bit mode due to hardware buffer limitations
+        - Each 8-bit pattern requires ~370KB compressed, ~9MB total for 25 patterns
+        - Each pattern can have individual timing and trigger settings
+        - For more patterns, consider using 1-bit mode (max 400 patterns)
+        """
+        max_patterns = 25
+        if len(images) > max_patterns:
+            raise ValueError(f"Maximum number of 8-bit patterns ({max_patterns}) exceeded")
+        if not all(len(lst) == len(images) for lst in [exp, ti, dt, to]):
+            raise ValueError("All input lists must have the same length as images list")
+        
+        import time
+        
+        # Required sequence for mode change (per DLPC900 reference implementations):
+        # Stop → Set Pattern OTF mode → Stop again
+        self.command('w',0x00,0x1a,0x24,[0])  # Stop before mode change
+        self.checkforerrors()
+        time.sleep(0.05)
+        
+        self.command('w',0x00,0x1a,0x1b,[3])  # Set Pattern On-The-Fly mode
+        self.checkforerrors()
+        time.sleep(0.05)
+        
+        self.command('w',0x00,0x1a,0x24,[0])  # Stop again after mode change
+        self.checkforerrors()
+        time.sleep(0.05)
+        
+        num = len(images)
+        encodedimages = []
+        sizes = []
+
+        # Step 1: Encode all 8-bit patterns
+        msg = f'Encoding {num} 8-bit patterns...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
         for i in range(num):
-            print(f'uploading image {i+1}/{num}...')
-            self.setbmp(num-1-i, sizes[num-1-i])
-            self.bmpload(encodedimages[num-1-i], sizes[num-1-i])
-
-
-
-
-
+            msg = f'  Encoding 8-bit pattern {i+1}/{num}...'
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+            
+            # Encode the 8-bit pattern
+            imagedata, size = encode_8bit([images[i]])
+            encodedimages.append(imagedata)
+            sizes.append(size)
+        
+        # Step 2: Define all pattern parameters
+        msg = f'Defining {num} 8-bit patterns...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        for i in range(num):
+            # Define pattern with 8-bit depth
+            # patind = i (each image gets its own index)
+            # bitpos = 0 (for 8-bit mode, DMD handles bit planes internally)
+            self.definepattern(
+                i,             # Pattern index
+                exp[i],        # Exposure time
+                8,             # 8-bit depth
+                '111',         # RGB color (white)
+                ti[i],         # Trigger in
+                dt[i],         # Dark time
+                to[i],         # Trigger out
+                i,             # Pattern set index (one per pattern for 8-bit)
+                0              # Bit position (0 for 8-bit)
+            )
+        
+        # Step 3: Configure LUT
+        self.configurelut(num, rep)
+        
+        # Step 4: Upload images in reverse order (required by DLPC900)
+        msg = f'Uploading {num} 8-bit patterns in reverse order...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        msg = f'  Note: 8-bit uploads are large and may take several minutes...'
+        if progress_callback:
+            progress_callback(msg)
+        else:
+            print(msg)
+        for idx, i in enumerate(reversed(range(num))):
+            msg = f'  Pattern {i} ({idx+1}/{num}) - {sizes[i]} bytes...'
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+            self.setbmp(i, sizes[i])
+            self.bmpload(encodedimages[i], sizes[i], 
+                        progress_msg=f"Pattern {i}: ",
+                        progress_callback=progress_callback)

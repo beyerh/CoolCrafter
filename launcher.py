@@ -75,16 +75,16 @@ class LauncherApp:
                 'color': '#2196F3'
             },
             {
-                'name': 'Pycrafter6500',
-                'desc': 'DMD Standalone Control',
-                'file': 'Pycrafter6500_gui.py',
-                'color': '#4CAF50'
-            },
-            {
                 'name': 'CoolLED',
                 'desc': 'LED Standalone Control',
                 'file': 'CoolLED_gui.py',
                 'color': '#FF9800'
+            },
+            {
+                'name': 'GitHub Repository',
+                'desc': 'View source code and documentation',
+                'url': 'https://github.com/beyerh/CoolCrafter',
+                'color': '#6e5494'  # GitHub purple
             }
         ]
         
@@ -122,25 +122,30 @@ class LauncherApp:
         
         # Make the entire frame clickable
         for widget in [button_frame, inner_frame, name_label, desc_label]:
-            widget.bind('<Button-1>', lambda e, file=app['file']: self.launch_app(file))
+            widget.bind('<Button-1>', lambda e, a=app: self.launch_app(a))
             widget.bind('<Enter>', lambda e, f=button_frame: f.configure(relief='sunken'))
             widget.bind('<Leave>', lambda e, f=button_frame: f.configure(relief='raised'))
             widget.configure(cursor='hand2')
     
-    def launch_app(self, app_file):
-        """Launch the selected application and close launcher"""
+    def launch_app(self, app):
+        """Launch the selected application or open URL and close launcher"""
         try:
-            # Get the directory where launcher.py is located
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            app_path = os.path.join(script_dir, app_file)
-            
-            # Launch the application
-            if sys.platform == 'win32':
-                # Windows: use pythonw to avoid console window
-                subprocess.Popen([sys.executable, app_path])
+            if 'url' in app:
+                # Open URL in default web browser
+                import webbrowser
+                webbrowser.open(app['url'])
             else:
-                # Unix-like: standard python
-                subprocess.Popen([sys.executable, app_path])
+                # Get the directory where launcher.py is located
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                app_path = os.path.join(script_dir, app['file'])
+                
+                # Launch the application
+                if sys.platform == 'win32':
+                    # Windows: use pythonw to avoid console window
+                    subprocess.Popen([sys.executable, app_path])
+                else:
+                    # Unix-like: standard python
+                    subprocess.Popen([sys.executable, app_path])
             
             # Close launcher after successful launch
             self.root.quit()

@@ -258,7 +258,7 @@ class CoolLEDController:
 
 
 # Version info
-VERSION = "0.1"
+VERSION = "0.2"
 APP_NAME = "CoolLED pE-4000 Controller"
 GITHUB_URL = "https://github.com/beyerh/CoolCrafter"
 

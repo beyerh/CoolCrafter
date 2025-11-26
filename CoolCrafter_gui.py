@@ -232,7 +232,7 @@ class ImageItem:
         self.thumbnail_mirrored = ImageTk.PhotoImage(thumb_mirrored)
 
 # Version info
-VERSION = "0.1"
+VERSION = "0.2"
 APP_NAME = "CoolCrafter"
 GITHUB_URL = "https://github.com/beyerh/CoolCrafter"
 
@@ -240,7 +240,7 @@ class DMDControllerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME} v{VERSION} - DMD Controller")
-        self.root.geometry("1400x850")  # Optimized height
+        self.root.geometry("1400x880")  # Optimized height
         
         # Apply professional theme
         self.apply_theme()
@@ -264,10 +264,27 @@ class DMDControllerGUI:
         self.projection_start_time = None
         self.projection_total_time = None
         self.timer_update_id = None
+        # Upload state tracking
+        self.images_uploaded = False
+        self.uploaded_image_index = None  # Track which image was uploaded (for constant mode)
+        self.upload_thread = None
+        
+        # Settings with defaults
+        self.settings = {
+            'max_patterns_1bit': 400,
+            'max_patterns_8bit': 20,
+            'max_safe_exposure_us': MAX_SAFE_EXPOSURE_US,
+            'max_recommended_exposure_us': MAX_RECOMMENDED_EXPOSURE_US,
+            'trigger_on_off_path': r'C:\Users\Nikon\nikon_trigger\trigger_on_off.txt',
+            'trigger_next_path': r'C:\Users\Nikon\nikon_trigger\trigger_next.txt',
+            'nikon_start_black_frame': True  # Start with black frame in Nikon trigger mode
+        }
+        self.load_settings()
+        
         self.create_ui()
     
     def create_menu(self):
-        """Create menu bar with File and Help menus"""
+        """Create menu bar with File, Settings and Help menus"""
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
         
@@ -275,6 +292,11 @@ class DMDControllerGUI:
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Settings menu
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+        settings_menu.add_command(label="Configuration...", command=self.show_settings)
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -331,6 +353,128 @@ class DMDControllerGUI:
         """Open URL in default browser"""
         import webbrowser
         webbrowser.open(url)
+    
+    def show_settings(self):
+        """Show Settings configuration dialog"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Settings")
+        settings_window.geometry("600x500")
+        settings_window.resizable(False, False)
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        # Center the window
+        settings_window.update_idletasks()
+        x = (settings_window.winfo_screenwidth() // 2) - (600 // 2)
+        y = (settings_window.winfo_screenheight() // 2) - (500 // 2)
+        settings_window.geometry(f"600x500+{x}+{y}")
+        
+        # Content frame
+        content = ttk.Frame(settings_window, padding="20")
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # Title
+        ttk.Label(content, text="Configuration Settings", font=('TkDefaultFont', 14, 'bold')).pack(pady=(0, 20))
+        
+        # Pattern Limits Section
+        pattern_frame = ttk.LabelFrame(content, text="Pattern Limits", padding="10")
+        pattern_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(pattern_frame, text="Max 1-bit patterns:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        max_1bit_var = tk.IntVar(value=self.settings['max_patterns_1bit'])
+        ttk.Entry(pattern_frame, textvariable=max_1bit_var, width=15).grid(row=0, column=1, sticky=tk.W, padx=10)
+        ttk.Label(pattern_frame, text="(1-400)", foreground='gray').grid(row=0, column=2, sticky=tk.W)
+        
+        ttk.Label(pattern_frame, text="Max 8-bit patterns:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        max_8bit_var = tk.IntVar(value=self.settings['max_patterns_8bit'])
+        ttk.Entry(pattern_frame, textvariable=max_8bit_var, width=15).grid(row=1, column=1, sticky=tk.W, padx=10)
+        ttk.Label(pattern_frame, text="(1-25)", foreground='gray').grid(row=1, column=2, sticky=tk.W)
+        
+        # Exposure Limits Section
+        exposure_frame = ttk.LabelFrame(content, text="Exposure Limits (microseconds)", padding="10")
+        exposure_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(exposure_frame, text="Max safe exposure:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        max_safe_var = tk.IntVar(value=self.settings['max_safe_exposure_us'])
+        ttk.Entry(exposure_frame, textvariable=max_safe_var, width=15).grid(row=0, column=1, sticky=tk.W, padx=10)
+        ttk.Label(exposure_frame, text=f"({MAX_SAFE_EXPOSURE_US} default)", foreground='gray').grid(row=0, column=2, sticky=tk.W)
+        
+        ttk.Label(exposure_frame, text="Max recommended:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        max_rec_var = tk.IntVar(value=self.settings['max_recommended_exposure_us'])
+        ttk.Entry(exposure_frame, textvariable=max_rec_var, width=15).grid(row=1, column=1, sticky=tk.W, padx=10)
+        ttk.Label(exposure_frame, text=f"({MAX_RECOMMENDED_EXPOSURE_US} default)", foreground='gray').grid(row=1, column=2, sticky=tk.W)
+        
+        # Nikon Sync Paths Section
+        nikon_frame = ttk.LabelFrame(content, text="Nikon NIS Synchronization", padding="10")
+        nikon_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(nikon_frame, text="Trigger ON/OFF file:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        trigger_on_off_var = tk.StringVar(value=self.settings['trigger_on_off_path'])
+        ttk.Entry(nikon_frame, textvariable=trigger_on_off_var, width=40).grid(row=0, column=1, sticky=tk.W, padx=10)
+        ttk.Button(nikon_frame, text="Browse", command=lambda: self.browse_file(trigger_on_off_var)).grid(row=0, column=2, padx=5)
+        
+        ttk.Label(nikon_frame, text="Trigger NEXT file:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        trigger_next_var = tk.StringVar(value=self.settings['trigger_next_path'])
+        ttk.Entry(nikon_frame, textvariable=trigger_next_var, width=40).grid(row=1, column=1, sticky=tk.W, padx=10)
+        ttk.Button(nikon_frame, text="Browse", command=lambda: self.browse_file(trigger_next_var)).grid(row=1, column=2, padx=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(content)
+        button_frame.pack(fill=tk.X, pady=(20, 0))
+        
+        def save_settings():
+            # Validate and save
+            try:
+                self.settings['max_patterns_1bit'] = max(1, min(400, max_1bit_var.get()))
+                self.settings['max_patterns_8bit'] = max(1, min(25, max_8bit_var.get()))
+                self.settings['max_safe_exposure_us'] = max(100, max_safe_var.get())
+                self.settings['max_recommended_exposure_us'] = max(100, max_rec_var.get())
+                self.settings['trigger_on_off_path'] = trigger_on_off_var.get()
+                self.settings['trigger_next_path'] = trigger_next_var.get()
+                self.save_settings()
+                self.log_progress("Settings saved successfully")
+                settings_window.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save settings: {e}")
+        
+        ttk.Button(button_frame, text="Save", command=save_settings).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=settings_window.destroy).pack(side=tk.RIGHT)
+    
+    def browse_file(self, var):
+        """Browse for a file path"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if filename:
+            var.set(filename)
+    
+    def load_settings(self):
+        """Load settings from config file"""
+        import json
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    saved_settings = json.load(f)
+                    self.settings.update(saved_settings)
+        except Exception as e:
+            print(f"Could not load settings: {e}")
+    
+    def save_settings(self):
+        """Save settings to config file"""
+        import json
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception as e:
+            print(f"Could not save settings: {e}")
+    
+    def _save_black_frame_setting(self):
+        """Save black frame setting when checkbox is toggled"""
+        self.settings['nikon_start_black_frame'] = self.nikon_black_frame_var.get()
+        self.save_settings()
     
     def apply_theme(self):
         """Apply additional styling tweaks for the arc theme"""
@@ -392,12 +536,13 @@ class DMDControllerGUI:
         self.led_disconnect_btn = ttk.Button(led_btn_frame, text="Disconnect", command=self.disconnect_coolled, state=tk.DISABLED)
         self.led_disconnect_btn.pack(side=tk.LEFT)
         ttk.Label(led_frame, text="For pulsed mode illumination", font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(5, 0))
-        
+          
         mode_frame = ttk.LabelFrame(left_frame, text="Projection Mode", padding="5")
         mode_frame.pack(fill=tk.X, pady=(0, 10))
-        ttk.Radiobutton(mode_frame, text="Sequence (1-bit, up to 24 images)", variable=self.projection_mode, value='sequence', command=self.on_projection_mode_change).pack(anchor=tk.W)
+        ttk.Radiobutton(mode_frame, text="Image sequence", variable=self.projection_mode, value='sequence', command=self.on_projection_mode_change).pack(anchor=tk.W)
         ttk.Radiobutton(mode_frame, text="Constant (selected image only)", variable=self.projection_mode, value='constant', command=self.on_projection_mode_change).pack(anchor=tk.W)
         ttk.Radiobutton(mode_frame, text="Pulsed Projection", variable=self.projection_mode, value='pulsed', command=self.on_projection_mode_change).pack(anchor=tk.W)
+        ttk.Radiobutton(mode_frame, text="Nikon NIS Trigger", variable=self.projection_mode, value='nikon_trigger', command=self.on_projection_mode_change).pack(anchor=tk.W)
         
         # Sequence mode settings (1-bit images)
         self.sequence_frame = ttk.LabelFrame(left_frame, text="Sequence Mode Settings", padding="5")
@@ -452,6 +597,59 @@ class DMDControllerGUI:
         # Display calculated value
         self.pulsed_calc_label = ttk.Label(self.pulsed_frame, text="", foreground="blue", font=('TkDefaultFont', 8))
         self.pulsed_calc_label.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        
+        # Timing compensation mode
+        ttk.Separator(self.pulsed_frame, orient='horizontal').grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(self.pulsed_frame, text="Timing Mode:", font=('TkDefaultFont', 9, 'bold')).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(0, 2))
+        
+        self.timing_mode_var = tk.StringVar(value="precise_total")
+        timing_frame = ttk.Frame(self.pulsed_frame)
+        timing_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=2)
+        
+        ttk.Radiobutton(timing_frame, text="Precise Total Time", variable=self.timing_mode_var, 
+                       value="precise_total").pack(anchor=tk.W)
+        ttk.Label(timing_frame, text="  Compensates upload delays", 
+                 foreground="gray", font=('TkDefaultFont', 8)).pack(anchor=tk.W, padx=(20, 0))
+        
+        ttk.Radiobutton(timing_frame, text="Precise Pulse Time", variable=self.timing_mode_var, 
+                       value="precise_pulse").pack(anchor=tk.W, pady=(5, 0))
+        ttk.Label(timing_frame, text="  Exact pulse duration", 
+                 foreground="gray", font=('TkDefaultFont', 8)).pack(anchor=tk.W, padx=(20, 0))
+        
+        # Nikon NIS Trigger mode settings (compact)
+        self.nikon_trigger_frame = ttk.LabelFrame(left_frame, text="Nikon NIS Trigger", padding="5")
+        
+        # Status display
+        status_info_frame = ttk.Frame(self.nikon_trigger_frame)
+        status_info_frame.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+        
+        ttk.Label(status_info_frame, text="Status:", foreground="gray", font=('TkDefaultFont', 8)).pack(side=tk.LEFT)
+        self.nikon_on_off_status = ttk.Label(status_info_frame, text="--", font=('TkDefaultFont', 8, 'bold'))
+        self.nikon_on_off_status.pack(side=tk.LEFT, padx=(5, 15))
+        
+        ttk.Label(status_info_frame, text="Next:", foreground="gray", font=('TkDefaultFont', 8)).pack(side=tk.LEFT)
+        self.nikon_next_status = ttk.Label(status_info_frame, text="--", font=('TkDefaultFont', 8, 'bold'))
+        self.nikon_next_status.pack(side=tk.LEFT, padx=5)
+        
+        # Current pattern
+        pattern_frame = ttk.Frame(self.nikon_trigger_frame)
+        pattern_frame.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=2)
+        ttk.Label(pattern_frame, text="Pattern:", foreground="gray", font=('TkDefaultFont', 8)).pack(side=tk.LEFT)
+        self.nikon_current_pattern = ttk.Label(pattern_frame, text="--", font=('TkDefaultFont', 8, 'bold'))
+        self.nikon_current_pattern.pack(side=tk.LEFT, padx=5)
+        
+        # Black frame option (compact)
+        ttk.Separator(self.nikon_trigger_frame, orient='horizontal').grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=8)
+        
+        self.nikon_black_frame_var = tk.BooleanVar(value=self.settings.get('nikon_start_black_frame', True))
+        black_frame_cb = ttk.Checkbutton(self.nikon_trigger_frame, 
+                                        text="Start with black frame", 
+                                        variable=self.nikon_black_frame_var,
+                                        command=self._save_black_frame_setting)
+        black_frame_cb.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=2)
+        ttk.Label(self.nikon_trigger_frame, 
+                 text="Recommended for NIS macro 'trigger_on_next.mac'",
+                 foreground="gray", font=('TkDefaultFont', 7)).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
         
         # Image Management and Global Settings moved to right panel
         
@@ -513,6 +711,18 @@ class DMDControllerGUI:
         self.preview_label = ttk.Label(preview_left, text="No image selected", foreground="gray")
         self.preview_label.pack(pady=5)
         
+        # Nikon NIS Trigger help (shown only when mode is active)
+        self.nikon_help_frame = ttk.LabelFrame(preview_left, text="ℹ Nikon NIS Trigger Mode", padding="8")
+        self.nikon_help_frame.pack_forget()  # Hidden by default
+        
+        help_text = """How it works:
+• NIS writes 1 to trigger_on_off.txt → starts projection
+• NIS increments trigger_next.txt → shows next pattern  
+• NIS writes 0 to trigger_on_off.txt → stops projection"""
+
+        ttk.Label(self.nikon_help_frame, text=help_text, justify=tk.LEFT,
+                 foreground="#555", font=('TkDefaultFont', 8)).pack(anchor=tk.W)
+        
         settings_right = ttk.Frame(preview_frame)
         settings_right.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
         settings_inner = ttk.LabelFrame(settings_right, text="Selected Image Settings", padding="10")
@@ -524,19 +734,41 @@ class DMDControllerGUI:
         mode_combo.grid(row=0, column=1, sticky=tk.W, pady=5, padx=(5, 0))
         mode_combo.bind('<<ComboboxSelected>>', self.on_image_setting_change)
         
+        # Exposure label and input field - matching Duration field layout
         ttk.Label(settings_inner, text="Exposure (μs):").grid(row=1, column=0, sticky=tk.W, pady=5)
+        
+        # Create a container for the input field
+        exposure_frame = ttk.Frame(settings_inner)
+        exposure_frame.grid(row=1, column=1, sticky=tk.W, pady=5, padx=(5, 0))
+        
+        # Add the input field
         self.img_exposure_var = tk.StringVar()
-        ttk.Entry(settings_inner, textvariable=self.img_exposure_var, width=18).grid(row=1, column=1, sticky=tk.W, pady=5, padx=(5, 0))
+        ttk.Entry(exposure_frame, textvariable=self.img_exposure_var, width=18).pack(anchor=tk.W)
         self.img_exposure_var.trace('w', lambda *args: self.on_image_setting_change())
         
-        ttk.Label(settings_inner, text="Dark Time (μs):").grid(row=2, column=0, sticky=tk.W, pady=5)
+        # Add minimum exposure time label in the next row, spanning both columns
+        self.min_exposure_label = ttk.Label(
+            settings_inner,
+            text="Min: 105 μs (1-bit)",
+            font=('TkDefaultFont', 8),
+            foreground='gray'
+        )
+        # Place the label in a new row below the exposure input
+        self.min_exposure_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(5, 0), pady=(0, 5))
+        
+        # Update label when bit depth changes
+        self.img_mode_var.trace('w', self.update_min_exposure_label)
+        
+        # Move Dark Time to row 3 (after the min exposure label)
+        ttk.Label(settings_inner, text="Dark Time (μs):").grid(row=3, column=0, sticky=tk.W, pady=5)
         self.img_dark_time_var = tk.StringVar()
-        ttk.Entry(settings_inner, textvariable=self.img_dark_time_var, width=18).grid(row=2, column=1, sticky=tk.W, pady=5, padx=(5, 0))
+        ttk.Entry(settings_inner, textvariable=self.img_dark_time_var, width=18).grid(row=3, column=1, sticky=tk.W, pady=5, padx=(5, 0))
         self.img_dark_time_var.trace('w', lambda *args: self.on_image_setting_change())
         
-        ttk.Label(settings_inner, text="Duration:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        # Move Duration to row 4
+        ttk.Label(settings_inner, text="Duration:").grid(row=4, column=0, sticky=tk.W, pady=5)
         duration_frame = ttk.Frame(settings_inner)
-        duration_frame.grid(row=3, column=1, sticky=tk.W, pady=5, padx=(5, 0))
+        duration_frame.grid(row=4, column=1, sticky=tk.W, pady=5, padx=(5, 0))
         self.img_duration_var = tk.StringVar(value="60")
         self.img_duration_entry = ttk.Entry(duration_frame, textvariable=self.img_duration_var, width=10)
         self.img_duration_entry.pack(side=tk.LEFT, padx=(0, 2))
@@ -545,11 +777,12 @@ class DMDControllerGUI:
         self.img_duration_unit_combo.pack(side=tk.LEFT)
         self.img_duration_var.trace('w', lambda *args: self.on_image_setting_change())
         self.img_duration_unit_var.trace('w', lambda *args: self.on_image_setting_change())
-        ttk.Label(settings_inner, text="(For pulsed mode only)", font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W)
+        # Move pulsed mode note to row 5
+        ttk.Label(settings_inner, text="(For pulsed mode only)", font=('TkDefaultFont', 8), foreground='gray').grid(row=5, column=0, columnspan=2, sticky=tk.W)
         
-        # CoolLED Illumination Settings
-        ttk.Separator(settings_inner, orient=tk.HORIZONTAL).grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
-        ttk.Label(settings_inner, text="LED Illumination:", font=('TkDefaultFont', 9, 'bold')).grid(row=6, column=0, columnspan=2, sticky=tk.W)
+        # CoolLED Illumination Settings (moved down by 1 row)
+        ttk.Separator(settings_inner, orient=tk.HORIZONTAL).grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        ttk.Label(settings_inner, text="LED Illumination:", font=('TkDefaultFont', 9, 'bold')).grid(row=7, column=0, columnspan=2, sticky=tk.W)
         
         # LED enabled automatically when any channel is selected (no checkbox needed)
         self.img_led_enabled_var = tk.BooleanVar(value=False)
@@ -609,6 +842,8 @@ class DMDControllerGUI:
         
         control_frame = ttk.Frame(right_frame)
         control_frame.pack(fill=tk.X, pady=(0, 10))
+        self.upload_btn = ttk.Button(control_frame, text="⬆ Upload to DMD", command=self.upload_to_dmd, state=tk.DISABLED)
+        self.upload_btn.pack(fill=tk.X, pady=2)
         self.start_btn = ttk.Button(control_frame, text="▶ Start Projection", command=self.start_projection, state=tk.DISABLED)
         self.start_btn.pack(fill=tk.X, pady=2)
         self.stop_btn = ttk.Button(control_frame, text="⏹ Stop", command=self.stop_projection, state=tk.DISABLED)
@@ -630,8 +865,8 @@ class DMDControllerGUI:
         
         # Sequence Info
         info_frame = ttk.LabelFrame(right_frame, text="Sequence Info", padding="5")
-        info_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.info_text = tk.Text(info_frame, height=8, wrap=tk.WORD, state=tk.DISABLED)
+        info_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
+        self.info_text = tk.Text(info_frame, height=4, wrap=tk.WORD, state=tk.DISABLED)
         self.info_text.pack(fill=tk.BOTH, expand=True)
         self.update_sequence_info()
         
@@ -716,10 +951,10 @@ class DMDControllerGUI:
             self.dlp.changemode(3)
             self.connected = True
             self.demo_mode = False
-            self.status_label.config(text="● Connected (Hardware)", foreground="green")
+            self.status_label.config(text="● Connected", foreground="green")
             self.connect_btn.config(state=tk.DISABLED)
             self.disconnect_btn.config(state=tk.NORMAL)
-            self.start_btn.config(state=tk.NORMAL)
+            self.update_button_states()
             self.log_progress("Connected successfully!")
             #messagebox.showinfo("Success", "Connected to DMD hardware!")
             
@@ -744,10 +979,14 @@ class DMDControllerGUI:
         self.dlp = None
         self.connected = False
         self.demo_mode = False
+        self.images_uploaded = False
+        self.uploaded_image_index = None
         self.status_label.config(text="● Disconnected", foreground="red")
+        self.proj_status_label.config(text="Ready")
+        self.proj_info_label.config(text="")
         self.connect_btn.config(state=tk.NORMAL)
         self.disconnect_btn.config(state=tk.DISABLED)
-        self.start_btn.config(state=tk.DISABLED)
+        self.update_button_states()
         self.log_progress("Disconnected")
     
     def connect_coolled(self):
@@ -823,7 +1062,7 @@ class DMDControllerGUI:
         self.status_label.config(text="● Demo Mode", foreground="orange")
         self.connect_btn.config(state=tk.DISABLED)
         self.disconnect_btn.config(state=tk.NORMAL)
-        self.start_btn.config(state=tk.NORMAL)
+        self.update_button_states()
         self.log_progress("Demo Mode enabled - All GUI features available for testing")
         messagebox.showinfo(
             "Demo Mode Enabled",
@@ -858,6 +1097,8 @@ class DMDControllerGUI:
         self.sequence_frame.pack_forget()
         self.constant_frame.pack_forget()
         self.pulsed_frame.pack_forget()
+        self.nikon_trigger_frame.pack_forget()
+        self.nikon_help_frame.pack_forget()
         
         # Show the appropriate frame for the selected mode
         mode = self.projection_mode.get()
@@ -869,12 +1110,18 @@ class DMDControllerGUI:
         elif mode == 'pulsed':
             self.pulsed_frame.pack(fill=tk.X, pady=(0, 10))
             self.calculate_cycles_from_runtime()  # Update display
+        elif mode == 'nikon_trigger':
+            self.nikon_trigger_frame.pack(fill=tk.X, pady=(0, 10))
+            self.nikon_help_frame.pack(fill=tk.X, pady=(5, 0))  # Show help below preview
         
         # Update duration field state based on mode
         self.update_duration_field_state()
         
         # Update LED hint label
         self.update_led_hint_label()
+        
+        # Mark images as not uploaded when mode changes
+        self.mark_images_not_uploaded()
         
         self.update_sequence_info()
     
@@ -892,6 +1139,8 @@ class DMDControllerGUI:
             self.image_tree.insert('', tk.END, values=(os.path.basename(filepath), img_item.mode, img_item.exposure, img_item.dark_time, img_item.duration))
         self.update_sequence_info()
         self.log_progress(f"Added {len(filepaths)} image(s)")
+        # Mark images as not uploaded since sequence changed
+        self.mark_images_not_uploaded()
         # Update pulsed mode calculations if in pulsed mode
         if self.projection_mode.get() == 'pulsed':
             self.calculate_cycles_from_runtime()
@@ -905,6 +1154,7 @@ class DMDControllerGUI:
         self.selected_image_index = None
         self.clear_preview()
         self.update_sequence_info()
+        self.mark_images_not_uploaded()
     
     def clear_all_images(self):
         if not self.images or not messagebox.askyesno("Confirm", "Clear all?"): return
@@ -913,6 +1163,7 @@ class DMDControllerGUI:
         self.selected_image_index = None
         self.clear_preview()
         self.update_sequence_info()
+        self.mark_images_not_uploaded()
     
     def move_image_up(self):
         """Move selected image up in the list"""
@@ -932,6 +1183,9 @@ class DMDControllerGUI:
         self.image_tree.selection_set(items[idx-1])
         self.image_tree.focus(items[idx-1])
         self.selected_image_index = idx - 1
+        
+        # Mark images as not uploaded since order changed
+        self.mark_images_not_uploaded()
         
         # Update pulsed mode calculations if in pulsed mode
         if self.projection_mode.get() == 'pulsed':
@@ -956,6 +1210,9 @@ class DMDControllerGUI:
         self.image_tree.focus(items[idx+1])
         self.selected_image_index = idx + 1
         
+        # Mark images as not uploaded since order changed
+        self.mark_images_not_uploaded()
+        
         # Update pulsed mode calculations if in pulsed mode
         if self.projection_mode.get() == 'pulsed':
             self.calculate_cycles_from_runtime()
@@ -971,6 +1228,7 @@ class DMDControllerGUI:
             img.mode = mode
             img.exposure = exposure
         self.refresh_image_list()
+        self.mark_images_not_uploaded()
     
     def update_led_hint_label(self):
         """Update the LED hint label based on projection mode"""
@@ -993,6 +1251,13 @@ class DMDControllerGUI:
         sel = self.image_tree.selection()
         if not sel: return
         idx = self.image_tree.index(sel[0])
+        
+        # In constant mode, selecting a different image means we need to re-upload
+        if self.projection_mode.get() == 'constant' and self.images_uploaded:
+            # Check if we're selecting a different image than what was uploaded
+            if self.uploaded_image_index is not None and idx != self.uploaded_image_index:
+                self.mark_images_not_uploaded()
+        
         self.selected_image_index = idx
         img = self.images[idx]
         
@@ -1032,14 +1297,27 @@ class DMDControllerGUI:
         except Exception as e:
             self.log_progress(f"Load error: {e}")
     
+    def update_min_exposure_label(self, *args):
+        """Update the minimum exposure time label based on selected bit depth"""
+        try:
+            mode = self.img_mode_var.get()
+            if mode == '8bit':
+                self.min_exposure_label.config(text="Min: 4046 μs (8-bit)")
+            else:  # Default to 1-bit
+                self.min_exposure_label.config(text="Min: 105 μs (1-bit)")
+        except Exception as e:
+            print(f"Error updating min exposure label: {e}")
+    
     def on_image_setting_change(self, event=None):
+        """Handle changes to image settings"""
         # Don't save changes if we're currently loading an image's values into the GUI
         if getattr(self, '_loading_image', False):
             return
-        if self.selected_image_index is None: return
+            
+        if self.selected_image_index is None:
+            return
+            
         img = self.images[self.selected_image_index]
-        
-        # Flag to track if we should recalculate
         should_recalculate = False
         
         try:
@@ -1047,20 +1325,48 @@ class DMDControllerGUI:
             if not self.img_exposure_var.get() or not self.img_dark_time_var.get() or not self.img_duration_var.get():
                 return  # Don't process if any field is empty
             
-            img.mode = self.img_mode_var.get()
-            img.exposure = int(self.img_exposure_var.get())
-            img.dark_time = int(self.img_dark_time_var.get())
-            # Convert duration to seconds based on selected unit
-            duration_value = float(self.img_duration_var.get())
-            unit = self.img_duration_unit_var.get()
-            if unit == 'min':
-                img.duration = int(duration_value * 60)
-            elif unit == 'hrs':
-                img.duration = int(duration_value * 3600)
-            else:  # sec
-                img.duration = int(duration_value)
-            # Store the unit preference with the image
-            img.duration_unit = unit
+            # Update mode if changed
+            new_mode = self.img_mode_var.get()
+            if new_mode in ['1bit', '8bit'] and new_mode != img.mode:
+                img.mode = new_mode
+                # Update the min exposure label when mode changes
+                self.update_min_exposure_label()
+                # Set default exposure based on mode
+                if new_mode == '8bit' and int(self.img_exposure_var.get()) < 4046:
+                    self.img_exposure_var.set("4046")  # Set to minimum for 8-bit
+                elif new_mode == '1bit' and int(self.img_exposure_var.get()) < 105:
+                    self.img_exposure_var.set("105")  # Set to minimum for 1-bit
+            
+            # Update exposure time if changed and valid
+            try:
+                exposure = int(self.img_exposure_var.get())
+                if exposure > 0:  # Only update if valid positive number
+                    img.exposure = exposure
+            except (ValueError, tk.TclError):
+                pass  # Ignore invalid entries (non-numeric)
+            
+            # Update duration if changed and valid
+            try:
+                duration_value = float(self.img_duration_var.get())
+                unit = self.img_duration_unit_var.get()
+                if unit == 'min':
+                    img.duration = int(duration_value * 60)
+                elif unit == 'hrs':
+                    img.duration = int(duration_value * 3600)
+                else:  # sec
+                    img.duration = int(duration_value)
+                # Store the unit preference with the image
+                img.duration_unit = unit
+            except (ValueError, tk.TclError):
+                pass  # Ignore invalid entries (non-numeric)
+            
+            # Update dark time if changed and valid
+            try:
+                dark_time = int(self.img_dark_time_var.get())
+                if dark_time >= 0:  # Only update if valid non-negative number
+                    img.dark_time = dark_time
+            except (ValueError, tk.TclError):
+                pass  # Ignore invalid entries (non-numeric)
             
             # Update LED settings
             # Auto-enable LED if any channel is enabled
@@ -1078,13 +1384,22 @@ class DMDControllerGUI:
             img.led_enabled = any_channel_enabled
             self.img_led_enabled_var.set(any_channel_enabled)
             
-            # Fix numpy array boolean check
+            # Reload image if needed
             if img.image_array is not None:
                 img.load_image()
-            self.refresh_image_list()
+            
             should_recalculate = True
-        except ValueError:
+                
+        except Exception as e:
+            print(f"Error updating image settings: {e}")
             return  # Don't recalculate if there was an error
+        
+        # Update the image list to reflect changes
+        self.refresh_image_list()
+        
+        # Mark images as not uploaded since settings changed
+        if should_recalculate:
+            self.mark_images_not_uploaded()
         
         # Update pulsed mode calculations when duration changes
         if self.projection_mode.get() == 'pulsed' and should_recalculate:
@@ -1291,38 +1606,260 @@ class DMDControllerGUI:
             return f"{secs}s"
     
     def validate_exposure_times(self, images_to_check):
-        """Validate that exposure times are within hardware limits"""
+        """Validate that exposure times are within hardware limits
+        
+        Validates both minimum and maximum exposure times:
+        - 1-bit images: min 105μs, max as defined by hardware
+        - 8-bit images: min 4046μs, max as defined by hardware
+        """
         warnings = []
         errors = []
         
+        # Define minimum exposure times in microseconds
+        MIN_EXPOSURE_1BIT = 105    # 105 μs for 1-bit images
+        MIN_EXPOSURE_8BIT = 4046   # 4046 μs for 8-bit images
+        
         for img in images_to_check:
-            if img.exposure > MAX_SAFE_EXPOSURE_US:
-                errors.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_SAFE_EXPOSURE_US/1000000}s limit)")
+            # Check minimum exposure time
+            if img.mode == '1bit' and img.exposure < MIN_EXPOSURE_1BIT:
+                errors.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (<{MIN_EXPOSURE_1BIT}μs minimum for 1-bit)")
+            elif img.mode == '8bit' and img.exposure < MIN_EXPOSURE_8BIT:
+                errors.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (<{MIN_EXPOSURE_8BIT}μs minimum for 8-bit)")
+            # Check maximum exposure time (existing check)
+            elif img.exposure > MAX_SAFE_EXPOSURE_US:
+                errors.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_SAFE_EXPOSURE_US/1000000:.3f}s maximum)")
             elif img.exposure > MAX_RECOMMENDED_EXPOSURE_US:
-                warnings.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_RECOMMENDED_EXPOSURE_US/1000000}s recommended)")
+                warnings.append(f"{os.path.basename(img.filepath)}: {img.exposure}μs (>{MAX_RECOMMENDED_EXPOSURE_US/1000000:.3f}s recommended)")
         
         if errors:
-            msg = "❌ Exposure times EXCEED hardware limit!\n\n"
-            msg += "Projections will terminate early (~3 seconds actual).\n\n"
-            msg += "Images with invalid exposures:\n"
-            for err in errors:
-                msg += f"• {err}\n"
-            msg += f"\n💡 Solution: Keep exposures ≤ {MAX_SAFE_EXPOSURE_US/1000000}s"
-            msg += "\nFor longer projections, duplicate the image or use more cycles."
+            msg = "❌ Exposure time validation failed!\n\n"
+            
+            # Check if we have minimum exposure time violations
+            min_errors = [e for e in errors if "minimum" in e]
+            max_errors = [e for e in errors if "maximum" in e]
+            
+            if min_errors:
+                msg += "• Some exposures are below the minimum required time:\n"
+                for err in min_errors:
+                    msg += f"  - {err}\n"
+                msg += "\n  Minimum exposure times:\n"
+                msg += f"  - 1-bit images: {MIN_EXPOSURE_1BIT} μs\n"
+                msg += f"  - 8-bit images: {MIN_EXPOSURE_8BIT} μs\n\n"
+                
+            if max_errors:
+                msg += "• Some exposures exceed the hardware limit:\n"
+                for err in max_errors:
+                    msg += f"  - {err}\n"
+                msg += "\n  Projections will terminate early if these limits are exceeded.\n"
+                msg += f"  For reliable operation, keep exposures ≤ {MAX_RECOMMENDED_EXPOSURE_US/1000000:.3f}s\n\n"
+            
+            msg += "💡 Solutions:\n"
+            if min_errors:
+                msg += "  - Increase exposure times to meet minimum requirements\n"
+            if max_errors:
+                msg += "  - Decrease exposure times or use multiple cycles\n"
+                
             messagebox.showerror("Exposure Time Error", msg)
             return False
         
         if warnings:
-            msg = f"⚠️ Some exposures exceed {MAX_RECOMMENDED_EXPOSURE_US/1000000}s (confirmed safe limit):\n\n"
+            msg = f"⚠️ Some exposures exceed {MAX_RECOMMENDED_EXPOSURE_US/1000000:.3f}s (recommended safe limit):\n\n"
             for warn in warnings:
                 msg += f"• {warn}\n"
-            msg += f"\nThey may work up to {MAX_SAFE_EXPOSURE_US/1000000}s, but test your hardware.\n"
-            msg += "For guaranteed reliability, keep exposures ≤ 3s.\n\n"
+            msg += f"\nThey may work up to {MAX_SAFE_EXPOSURE_US/1000000:.3f}s, but test your hardware.\n"
+            msg += "For guaranteed reliability, keep exposures within recommended limits.\n\n"
             msg += "Continue anyway?"
             if not messagebox.askyesno("Exposure Time Warning", msg):
                 return False
         
         return True
+    
+    def mark_images_not_uploaded(self):
+        """Mark that images need to be re-uploaded to DMD"""
+        self.images_uploaded = False
+        self.uploaded_image_index = None
+        self.update_button_states()
+    
+    def update_button_states(self):
+        """Update the enabled/disabled state of control buttons based on current state"""
+        if not self.connected:
+            self.upload_btn.config(state=tk.DISABLED)
+            self.start_btn.config(state=tk.DISABLED)
+            return
+        
+        if self.projecting:
+            # During projection
+            self.upload_btn.config(state=tk.DISABLED)
+            self.start_btn.config(state=tk.DISABLED)
+            self.stop_btn.config(state=tk.NORMAL)
+            return
+        
+        # Not projecting - check if we have images and if upload is needed
+        has_images = len(self.images) > 0
+        mode = self.projection_mode.get()
+        
+        # Pulsed and Nikon trigger modes don't benefit from pre-upload (upload on-demand)
+        if mode in ['pulsed', 'nikon_trigger']:
+            self.upload_btn.config(state=tk.DISABLED)
+            self.start_btn.config(state=tk.NORMAL if has_images else tk.DISABLED)
+        else:
+            # Sequence and constant modes require pre-upload
+            # Upload button enabled if images present and not already uploaded
+            self.upload_btn.config(state=tk.NORMAL if (has_images and not self.images_uploaded) else tk.DISABLED)
+            # Start button only enabled if images are uploaded
+            self.start_btn.config(state=tk.NORMAL if (has_images and self.images_uploaded) else tk.DISABLED)
+    
+    def upload_to_dmd(self):
+        """Pre-upload images to DMD without starting projection"""
+        if not self.connected:
+            messagebox.showerror("Error", "Not connected to DMD")
+            return
+        if not self.images:
+            messagebox.showerror("Error", "No images to upload")
+            return
+        
+        # Disable buttons during upload
+        self.upload_btn.config(state=tk.DISABLED)
+        self.start_btn.config(state=tk.DISABLED)
+        self.proj_status_label.config(text="Uploading...")
+        self.proj_info_label.config(text="")
+        
+        # Run upload in background thread
+        self.upload_thread = threading.Thread(target=self._do_upload, daemon=True)
+        self.upload_thread.start()
+    
+    def _do_upload(self):
+        """Background thread for uploading images to DMD"""
+        try:
+            mode = self.projection_mode.get()
+            
+            # Load all images into memory first
+            self.root.after(0, lambda: self.proj_info_label.config(text="Loading images..."))
+            for img in self.images:
+                if img.image_array is None:
+                    img.load_image()
+            
+            # Validate exposure times
+            self.root.after(0, lambda: self.proj_info_label.config(text="Validating settings..."))
+            if not self.validate_exposure_times(self.images if mode == 'sequence' else [self.images[self.selected_image_index]] if self.selected_image_index is not None else self.images):
+                self.root.after(0, self._upload_failed)
+                return
+            
+            # Upload to DMD based on mode
+            if mode == 'sequence':
+                self._upload_sequence()
+            elif mode == 'constant':
+                self._upload_constant()
+            
+            # Success - pass mode and relevant info to _upload_complete
+            self.root.after(0, lambda: self._upload_complete(mode))
+            
+        except Exception as e:
+            self.root.after(0, lambda err=str(e): self._upload_error(err))
+    
+    def _upload_sequence(self):
+        """Upload sequence mode images"""
+        self.root.after(0, lambda: self.proj_info_label.config(text=f"Uploading {len(self.images)} images..."))
+        
+        # Check for mixed bit depths
+        has_1bit = any(img.mode == '1bit' for img in self.images)
+        has_8bit = any(img.mode == '8bit' for img in self.images)
+        
+        if has_1bit and has_8bit:
+            raise ValueError("Cannot mix 1-bit and 8-bit images in sequence mode")
+        
+        sequence_mode = self.images[0].mode
+        
+        # Validate sequence length
+        num_images = len(self.images)
+        max_1bit = self.settings['max_patterns_1bit']
+        max_8bit = self.settings['max_patterns_8bit']
+        if sequence_mode == '1bit' and num_images > max_1bit:
+            raise ValueError(f"Maximum {max_1bit} 1-bit images in sequence. Current: {num_images}")
+        elif sequence_mode == '8bit' and num_images > max_8bit:
+            raise ValueError(f"Maximum {max_8bit} 8-bit images in sequence. Current: {num_images}")
+        
+        # Get repeat count
+        rep_input = int(self.seq_repeat_count_var.get()) if self.seq_repeat_count_var.get().isdigit() else 0
+        if rep_input == 0:
+            rep = 0xFFFFFFFF
+        else:
+            rep = rep_input * len(self.images)
+        
+        # Prepare sequence data
+        image_arrays = [img.image_array for img in self.images]
+        exposures = [img.exposure for img in self.images]
+        dark_times = [img.dark_time for img in self.images]
+        
+        # Upload to DMD with GUI progress callback
+        if sequence_mode == '1bit':
+            self.dlp.defsequence(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep, 
+                               progress_callback=self.log_progress)
+        else:
+            self.dlp.defsequence_8bit(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep,
+                                     progress_callback=self.log_progress)
+    
+    def _upload_constant(self):
+        """Upload constant mode image"""
+        if self.selected_image_index is None:
+            raise ValueError("No image selected for constant mode")
+        
+        img = self.images[self.selected_image_index]
+        self.root.after(0, lambda: self.proj_info_label.config(text="Uploading image..."))
+        
+        # Use infinite repeat for constant mode
+        rep = 0xFFFFFFFF
+        
+        if img.mode == '1bit':
+            self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
+                               progress_callback=self.log_progress)
+        else:
+            self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
+                                     progress_callback=self.log_progress)
+    
+    def _upload_complete(self, mode):
+        """Called when upload completes successfully"""
+        self.images_uploaded = True
+        
+        # Track what was uploaded
+        if mode == 'constant':
+            self.uploaded_image_index = self.selected_image_index
+            img = self.images[self.uploaded_image_index]
+            filename = os.path.basename(img.filepath)
+            status_text = f"Ready: {filename} ({img.mode})"
+            info_text = f"✓ Uploaded: {filename}"
+            self.log_progress(f"Upload complete! Uploaded: {filename} ({img.mode})")
+        else:  # sequence
+            self.uploaded_image_index = None  # Not applicable for sequence
+            num_images = len(self.images)
+            mode_type = self.images[0].mode
+            status_text = f"Ready: {num_images} images ({mode_type})"
+            info_text = f"✓ Uploaded: {num_images} images"
+            self.log_progress(f"Upload complete! Uploaded {num_images} {mode_type} images")
+        
+        self.proj_status_label.config(text=status_text)
+        self.proj_info_label.config(text=info_text)
+        self.log_progress("Press Start to begin projection.")
+        self.update_button_states()
+    
+    def _upload_failed(self):
+        """Called when upload validation fails"""
+        self.images_uploaded = False
+        self.uploaded_image_index = None
+        self.proj_status_label.config(text="Ready")
+        self.proj_info_label.config(text="")
+        self.log_progress("Upload cancelled")
+        self.update_button_states()
+    
+    def _upload_error(self, error_msg):
+        """Called when upload encounters an error"""
+        self.images_uploaded = False
+        self.uploaded_image_index = None
+        self.proj_status_label.config(text="Upload Failed")
+        self.proj_info_label.config(text="")
+        self.log_progress(f"Upload error: {error_msg}")
+        messagebox.showerror("Upload Error", f"Failed to upload images:\n\n{error_msg}")
+        self.update_button_states()
     
     def start_projection(self):
         if not self.connected:
@@ -1331,6 +1868,13 @@ class DMDControllerGUI:
         if not self.images:
             messagebox.showerror("Error", "No images")
             return
+        
+        # Check if images need to be uploaded first (for sequence/constant modes)
+        mode = self.projection_mode.get()
+        if mode in ['sequence', 'constant'] and not self.images_uploaded and not self.demo_mode:
+            messagebox.showerror("Upload Required", "Please upload images to DMD first using the 'Upload to DMD' button.")
+            return
+        
         for img in self.images:
             if img.image_array is None:
                 try: img.load_image()
@@ -1345,10 +1889,15 @@ class DMDControllerGUI:
         if self.demo_mode:
             self.log_progress("[DEMO MODE] Simulating projection (no hardware output)")
         
+        # Check if we can use pre-uploaded sequence
+        skip_upload = self.images_uploaded and mode in ['sequence', 'constant']
+        
+        if skip_upload and not self.demo_mode:
+            self.log_progress("Using pre-uploaded sequence (instant start!)")
+        
         self.stop_projection_flag = False
         self.projecting = True
-        self.start_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
+        self.update_button_states()
         self.proj_status_label.config(text="Projecting" if not self.demo_mode else "Simulating")
         
         # Initialize timer
@@ -1388,13 +1937,16 @@ class DMDControllerGUI:
         
         # Route to appropriate projection method based on mode
         if mode == 'sequence':
-            self.projection_thread = threading.Thread(target=self.run_sequence, daemon=True)
+            self.projection_thread = threading.Thread(target=lambda: self.run_sequence(skip_upload), daemon=True)
         elif mode == 'constant':
-            self.projection_thread = threading.Thread(target=self.run_constant, daemon=True)
+            self.projection_thread = threading.Thread(target=lambda: self.run_constant(skip_upload), daemon=True)
         elif mode == 'pulsed':
             self.projection_thread = threading.Thread(target=self.run_pulsed, daemon=True)
+        elif mode == 'nikon_trigger':
+            self.projection_thread = threading.Thread(target=self.run_nikon_trigger, daemon=True)
         
-        self.projection_thread.start()
+        if self.projection_thread:
+            self.projection_thread.start()
     
     def stop_projection(self):
         self.stop_projection_flag = True
@@ -1420,16 +1972,68 @@ class DMDControllerGUI:
             self.timer_update_id = None
         self.timer_label.config(text="")
         
-        self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
-        self.proj_status_label.config(text="Stopped")
+        # Restore upload status if images are still uploaded
+        if self.images_uploaded:
+            mode = self.projection_mode.get()
+            if mode == 'constant' and self.uploaded_image_index is not None:
+                img = self.images[self.uploaded_image_index]
+                filename = os.path.basename(img.filepath)
+                self.proj_status_label.config(text=f"Ready: {filename} ({img.mode})")
+                self.proj_info_label.config(text=f"✓ Uploaded: {filename}")
+            elif mode == 'sequence':
+                num_images = len(self.images)
+                mode_type = self.images[0].mode if self.images else '1bit'
+                self.proj_status_label.config(text=f"Ready: {num_images} images ({mode_type})")
+                self.proj_info_label.config(text=f"✓ Uploaded: {num_images} images")
+            else:
+                self.proj_status_label.config(text="Ready")
+                self.proj_info_label.config(text="")
+        else:
+            self.proj_status_label.config(text="Ready")
+            self.proj_info_label.config(text="")
+        
+        self.update_button_states()
         self.log_progress("Stopped" if not self.demo_mode else "[DEMO] Stopped simulation")
     
-    def run_sequence(self):
-        """Sequence mode: Projects all 1-bit images in sequence"""
+    def run_sequence(self, skip_upload=False):
+        """Sequence mode: Projects all images in sequence (1-bit or 8-bit)"""
         try:
-            self.log_progress("Starting sequence projection..." if not self.demo_mode else "[DEMO] Starting sequence projection simulation...")
-            bit1 = [i for i in self.images if i.mode=='1bit']
+            if skip_upload:
+                self.log_progress("Starting pre-uploaded sequence..." if not self.demo_mode else "[DEMO] Starting sequence projection simulation...")
+            else:
+                self.log_progress("Starting sequence projection..." if not self.demo_mode else "[DEMO] Starting sequence projection simulation...")
+            
+            # Check for empty sequence
+            if not self.images:
+                self.log_progress("Error: No images in the sequence.")
+                self.root.after(0, self.stop_projection)
+                return
+                
+            # Check if we have mixed bit depths (not supported in a single sequence)
+            has_1bit = any(img.mode == '1bit' for img in self.images)
+            has_8bit = any(img.mode == '8bit' for img in self.images)
+            
+            if has_1bit and has_8bit:
+                self.log_progress("Error: Cannot mix 1-bit and 8-bit images in the same sequence. Please use all 1-bit or all 8-bit images.")
+                self.root.after(0, self.stop_projection)
+                return
+                
+            # Determine sequence mode based on first image
+            sequence_mode = self.images[0].mode
+            
+            # Validate sequence length against hardware limits
+            num_images = len(self.images)
+            max_1bit = self.settings['max_patterns_1bit']
+            max_8bit = self.settings['max_patterns_8bit']
+            if sequence_mode == '1bit' and num_images > max_1bit:
+                self.log_progress(f"Error: Maximum of {max_1bit} 1-bit images allowed in sequence mode. Current: {num_images} images.")
+                self.root.after(0, self.stop_projection)
+                return
+            elif sequence_mode == '8bit' and num_images > max_8bit:
+                self.log_progress(f"Error: Maximum of {max_8bit} 8-bit images allowed in sequence mode. Current: {num_images} images.")
+                self.root.after(0, self.stop_projection)
+                return
+            
             # DLPC900 repeat count = TOTAL pattern displays, not sequence loops
             # User enters "cycles", we need to multiply by number of images
             rep_input = int(self.seq_repeat_count_var.get()) if self.seq_repeat_count_var.get().isdigit() else 0
@@ -1437,25 +2041,20 @@ class DMDControllerGUI:
                 rep = 0xFFFFFFFF  # Infinite
             else:
                 # For K cycles of N images: repeat = K * N total displays
-                rep = rep_input * len([i for i in self.images if i.mode=='1bit'])
-            
-            if not bit1:
-                self.log_progress("Error: No 1-bit images found for sequence mode. Set Mode to 1-bit.")
-                self.root.after(0, self.stop_projection)
-                return
+                rep = rep_input * len(self.images)
             
             # Ensure all images are loaded
-            for img in bit1:
+            for img in self.images:
                 if img.image_array is None:
                     img.load_image()
             
-            # Validate exposure times before starting
-            if not self.demo_mode and not self.validate_exposure_times(bit1):
+            # Validate exposure times before starting (both demo and non-demo modes)
+            if not self.validate_exposure_times(self.images):
                 self.root.after(0, self.stop_projection)
                 return
             
             # Check and activate LED using first image's settings
-            first_img = bit1[0]
+            first_img = self.images[0]
             if first_img.led_enabled and self.coolled_connected:
                 try:
                     enabled_channels = [ch for ch in ['A', 'B', 'C', 'D'] if first_img.led_channels[ch]['enabled']]
@@ -1466,7 +2065,9 @@ class DMDControllerGUI:
                             
                             if not self.coolled_demo_mode:
                                 self.coolled.load_wavelength(wavelength)
+                                time.sleep(0.6)  # Wait for mechanical filter wheel rotation (0.6 sec for troubleshooting)
                                 self.coolled.set_intensity(channel, intensity)
+                                time.sleep(0.05)  # Wait for channel to activate
                                 self.log_progress(f"LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
                             else:
                                 self.log_progress(f"[DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
@@ -1481,9 +2082,9 @@ class DMDControllerGUI:
             
             if self.demo_mode:
                 # Demo mode
-                self.log_progress(f"[DEMO] Would project {len(bit1)} 1-bit image(s) in sequence:")
-                for idx, img in enumerate(bit1, 1):
-                    self.log_progress(f"[DEMO]   {idx}. {os.path.basename(img.filepath)} (Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
+                self.log_progress(f"[DEMO] Would project {len(self.images)} {sequence_mode} image(s) in sequence:")
+                for idx, img in enumerate(self.images, 1):
+                    self.log_progress(f"[DEMO]   {idx}. {os.path.basename(img.filepath)} ({img.mode}, Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
                 self.log_progress(f"[DEMO] Cycles: {'infinite' if rep == 0xFFFFFFFF else f'{rep_input} ({rep} total displays)'}")
                 if rep == 0xFFFFFFFF:
                     self.log_progress("[DEMO] Sequence would cycle continuously until stopped...")
@@ -1491,17 +2092,35 @@ class DMDControllerGUI:
                     self.log_progress(f"[DEMO] Sequence would run for {rep} displays then stop automatically")
             else:
                 # Real hardware mode
-                self.log_progress(f"Projecting sequence of {len(bit1)} 1-bit image(s):")
-                for idx, img in enumerate(bit1, 1):
-                    self.log_progress(f"  {idx}. {os.path.basename(img.filepath)} (Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
-                self.log_progress(f"Cycles: {'infinite' if rep == 0xFFFFFFFF else f'{rep_input} ({rep} total displays)'}")
-                self.dlp.defsequence([i.image_array for i in bit1], [i.exposure for i in bit1], [False]*len(bit1), [i.dark_time for i in bit1], [1]*len(bit1), rep)
+                if not skip_upload:
+                    self.log_progress(f"Projecting sequence of {len(self.images)} {sequence_mode} image(s):")
+                    for idx, img in enumerate(self.images, 1):
+                        self.log_progress(f"  {idx}. {os.path.basename(img.filepath)} ({img.mode}, Exposure: {img.exposure}μs, Dark: {img.dark_time}μs)")
+                    
+                    # Prepare sequence based on image mode
+                    image_arrays = [img.image_array for img in self.images]
+                    exposures = [img.exposure for img in self.images]
+                    dark_times = [img.dark_time for img in self.images]
+                    
+                    max_1bit = self.settings['max_patterns_1bit']
+                    max_8bit = self.settings['max_patterns_8bit']
+                    if sequence_mode == '1bit':
+                        self.log_progress(f"Using 1-bit sequence mode (max {max_1bit} patterns)")
+                        self.dlp.defsequence(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep,
+                                           progress_callback=self.log_progress)
+                    else:  # 8-bit mode
+                        self.log_progress(f"Using 8-bit sequence mode (max {max_8bit} patterns)")
+                        self.dlp.defsequence_8bit(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep,
+                                                 progress_callback=self.log_progress)
+                
+                # Start sequence (either new or pre-uploaded)
                 self.dlp.startsequence()
                 self.log_progress("Sequence projection started")
             
             # Cycle through images in preview to visualize sequence
             idx = 0
             total_displays = rep if rep != 0xFFFFFFFF else None  # None means infinite
+            sequence_start_time = time.time()
             
             while self.projecting and not self.stop_projection_flag:
                 # Check if we've reached the target number of displays (for finite sequences)
@@ -1510,13 +2129,13 @@ class DMDControllerGUI:
                     self.root.after(0, self.stop_projection)
                     break
                 
-                img = bit1[idx % len(bit1)]
+                img = self.images[idx % len(self.images)]
                 if total_displays is not None:
                     # Show progress for finite sequences
-                    self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)} | Display {idx+1}/{total_displays}")
+                    self.update_preview_during_projection(img, f"Frame {idx % len(self.images) + 1}/{len(self.images)} | Display {idx+1}/{total_displays}")
                 else:
                     # Show frame info for infinite sequences
-                    self.update_preview_during_projection(img, f"Frame {idx % len(bit1) + 1}/{len(bit1)}")
+                    self.update_preview_during_projection(img, f"Frame {idx % len(self.images) + 1}/{len(self.images)}")
                 
                 # Calculate time to display based on exposure + dark time (in seconds)
                 display_time = (img.exposure + img.dark_time) / 1000000.0  # Convert μs to seconds
@@ -1527,7 +2146,7 @@ class DMDControllerGUI:
             self.log_progress(f"Error: {e}")
             self.root.after(0, self.stop_projection)
     
-    def run_constant(self):
+    def run_constant(self, skip_upload=False):
         """Constant mode: Projects only the selected image"""
         try:
             if self.selected_image_index is None:
@@ -1550,7 +2169,10 @@ class DMDControllerGUI:
                 else:
                     total_time = time_value
             
-            self.log_progress("Starting constant projection..." if not self.demo_mode else "[DEMO] Starting constant projection simulation...")
+            if skip_upload:
+                self.log_progress("Starting pre-uploaded constant projection..." if not self.demo_mode else "[DEMO] Starting constant projection simulation...")
+            else:
+                self.log_progress("Starting constant projection..." if not self.demo_mode else "[DEMO] Starting constant projection simulation...")
             
             # Validate exposure time before starting
             if not self.demo_mode and not self.validate_exposure_times([img]):
@@ -1568,7 +2190,9 @@ class DMDControllerGUI:
                             
                             if not self.coolled_demo_mode:
                                 self.coolled.load_wavelength(wavelength)
+                                time.sleep(0.6)  # Wait for mechanical filter wheel rotation (0.6 sec for troubleshooting)
                                 self.coolled.set_intensity(channel, intensity)
+                                time.sleep(0.05)  # Wait for channel to activate
                                 self.log_progress(f"LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
                             else:
                                 self.log_progress(f"[DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
@@ -1608,23 +2232,26 @@ class DMDControllerGUI:
                     self.log_progress("[DEMO] Projection would continue until stopped...")
             else:
                 # Real hardware mode
-                self.log_progress(f"Projecting selected image: {filename}")
-                self.log_progress(f"Mode: {img.mode}, Exposure: {img.exposure}μs, Dark Time: {img.dark_time}μs")
-                self.log_progress(f"Duration: {total_time:.1f}s" if total_time else "Duration: Infinite (until stopped)")
+                if not skip_upload:
+                    self.log_progress(f"Projecting selected image: {filename}")
+                    self.log_progress(f"Mode: {img.mode}, Exposure: {img.exposure}μs, Dark Time: {img.dark_time}μs")
+                    self.log_progress(f"Duration: {total_time:.1f}s" if total_time else "Duration: Infinite (until stopped)")
+                    
+                    # Use 0xFFFFFFFF for infinite projection (DLPC900 standard)
+                    rep = 0xFFFFFFFF
+                    
+                    if img.mode == '1bit':
+                        # Project single 1-bit image
+                        self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
+                                           progress_callback=self.log_progress)
+                    else:
+                        # Project single 8-bit image
+                        self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
+                                                 progress_callback=self.log_progress)
                 
-                # Use 0xFFFFFFFF for infinite projection (DLPC900 standard)
-                rep = 0xFFFFFFFF
-                
-                if img.mode == '1bit':
-                    # Project single 1-bit image
-                    self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep)
-                    self.dlp.startsequence()
-                    self.log_progress("Constant projection started (1-bit)")
-                else:
-                    # Project single 8-bit image
-                    self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep)
-                    self.dlp.startsequence()
-                    self.log_progress("Constant projection started (8-bit)")
+                # Start sequence (either new or pre-uploaded)
+                self.dlp.startsequence()
+                self.log_progress("Constant projection started ({})" .format(img.mode))
                 
                 # If projection time is specified, wait then auto-stop
                 if total_time:
@@ -1660,7 +2287,27 @@ class DMDControllerGUI:
             cycles = int(runtime_sec / cycle_dur) if cycle_dur > 0 else 1
             
             self.log_progress("Starting pulsed projection..." if not self.demo_mode else "[DEMO] Starting pulsed projection simulation...")
+            
+            # Pre-load all images to minimize delays during transitions
+            if not self.demo_mode:
+                self.log_progress("Pre-loading all images...")
+                for img in self.images:
+                    if img.image_array is None:
+                        img.load_image()
+                
+                # Validate exposure times before starting
+                if not self.validate_exposure_times(self.images):
+                    self.root.after(0, self.stop_projection)
+                    return
+            
             self.log_progress(f"Total cycles: {cycles}, Cycle duration: {cycle_dur}s")
+            
+            # Get timing mode preference
+            timing_mode = self.timing_mode_var.get()
+            if timing_mode == "precise_total":
+                self.log_progress("Timing Mode: Precise Total Time (compensating for upload delays)")
+            else:
+                self.log_progress("Timing Mode: Precise Pulse Time (exact image durations)")
             
             # Check if any images have LED enabled
             led_images = [img for img in self.images if img.led_enabled]
@@ -1671,6 +2318,7 @@ class DMDControllerGUI:
                     self.log_progress("⚠ Warning: Some images have LED enabled but CoolLED not connected")
             
             start_time = time.time()
+            target_end_time = start_time + runtime_sec  # Target time for precise_total mode
             
             for c in range(1, cycles + 1):
                 if self.stop_projection_flag: break
@@ -1695,46 +2343,110 @@ class DMDControllerGUI:
                     
                     filename = os.path.basename(img.filepath)
                     
-                    # Turn off ALL CoolLED channels first (before switching to new image)
-                    if self.coolled_connected and not self.coolled_demo_mode:
-                        self.coolled.all_off()
-                    
-                    # Control CoolLED if enabled for this image
-                    if img.led_enabled and self.coolled_connected:
-                        enabled_channels = [ch for ch in ['A', 'B', 'C', 'D'] if img.led_channels[ch]['enabled']]
-                        if enabled_channels:
-                            for channel in enabled_channels:
-                                wavelength = img.led_channels[channel]['wavelength']
-                                intensity = img.led_channels[channel]['intensity']
-                                if not self.coolled_demo_mode:
-                                    # Real CoolLED hardware
-                                    self.coolled.load_wavelength(wavelength)
-                                    self.coolled.set_intensity(channel, intensity)
-                                    self.log_progress(f"  LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                                else:
-                                    # CoolLED demo mode
-                                    self.log_progress(f"  [DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
-                    elif img.led_enabled and not self.coolled_connected:
-                        self.log_progress(f"  ⚠ LED enabled but not connected")
-                    
                     if self.demo_mode:
                         # Demo mode: simulate projection with full duration
+                        # Turn off ALL CoolLED channels first
+                        if self.coolled_connected and not self.coolled_demo_mode:
+                            self.coolled.all_off()
+                        
+                        # Control CoolLED if enabled for this image
+                        if img.led_enabled and self.coolled_connected:
+                            enabled_channels = [ch for ch in ['A', 'B', 'C', 'D'] if img.led_channels[ch]['enabled']]
+                            if enabled_channels:
+                                for channel in enabled_channels:
+                                    wavelength = img.led_channels[channel]['wavelength']
+                                    intensity = img.led_channels[channel]['intensity']
+                                    self.log_progress(f"  [DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
+                        elif img.led_enabled and not self.coolled_connected:
+                            self.log_progress(f"  ⚠ LED enabled but not connected")
+                        
                         self.log_progress(f"[DEMO] Projecting {filename} ({img.mode}) for {img.duration}s...")
                         time.sleep(img.duration)  # Use full duration in demo mode
                     else:
                         # Real hardware mode
                         self.log_progress(f"Projecting {filename} ({img.mode}) for {img.duration}s...")
                         
-                        # Setup DMD sequence
+                        # Track time for upload compensation
+                        image_start_time = time.time()
+                        
+                        # CRITICAL SYNCHRONIZATION ORDER:
+                        # Stop DMD first to create dark period, then switch LEDs (invisible transition)
+                        
+                        # Determine which channels should be active for the new image
+                        target_channels = {}
+                        if self.coolled_connected and img.led_enabled:
+                            for ch in ['A', 'B', 'C', 'D']:
+                                if img.led_channels[ch]['enabled']:
+                                    target_channels[ch] = {
+                                        'wavelength': img.led_channels[ch]['wavelength'],
+                                        'intensity': img.led_channels[ch]['intensity']
+                                    }
+                        
+                        # Step 1: Stop current DMD sequence (screen goes dark instantly)
+                        # This hides any sequential LED switching
+                        self.dlp.stopsequence()
+                        time.sleep(0.02)
+                        
+                        # Step 2: Turn off all LED channels (now invisible because DMD is dark)
+                        if self.coolled_connected:
+                            for ch in ['A', 'B', 'C', 'D']:
+                                self.coolled.send_command(f"CSS{ch}SN000")
+                            time.sleep(0.1)  # Wait for all turn-off commands to complete
+                        
+                        # Step 3: Upload new DMD pattern (this takes time, especially for 8-bit)
+                        upload_start = time.time()
                         if img.mode == '1bit':
-                            self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
+                            self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0xFFFFFFFF,
+                                               progress_callback=self.log_progress)
                         else:
-                            self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0)
+                            self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0xFFFFFFFF,
+                                                     progress_callback=self.log_progress)
+                        upload_time = time.time() - upload_start
+                        
+                        # Step 4: Configure and turn on the target LED channels (still in dark period)
+                        if self.coolled_connected and target_channels:
+                            for channel, settings in target_channels.items():
+                                wavelength = settings['wavelength']
+                                intensity = settings['intensity']
+                                
+                                # Load wavelength for this specific channel
+                                # This triggers mechanical filter wheel rotation - needs significant time!
+                                self.coolled.send_command(f"LOAD:{wavelength}")
+                                time.sleep(0.6)  # 0.6 sec for mechanical wheel rotation
+                                
+                                # Set intensity to turn on the channel
+                                cmd = f"CSS{channel}SN{int(intensity):03d}"
+                                self.coolled.send_command(cmd)
+                                time.sleep(0.05)  # Wait for activation
+                                
+                                self.log_progress(f"  LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
+                        elif img.led_enabled and not self.coolled_connected:
+                            self.log_progress(f"  ⚠ LED enabled but not connected")
+                        
+                        # Step 5: Start DMD sequence - now LED and pattern are synchronized
                         self.dlp.startsequence()
                         
-                        # Sleep for the projection duration
-                        time.sleep(img.duration)
-                        self.dlp.stopsequence()
+                        # Calculate sleep duration based on timing mode
+                        if timing_mode == "precise_total":
+                            # Compensate for upload time to maintain precise total runtime
+                            # Calculate how long this image should take in ideal conditions
+                            elapsed = time.time() - image_start_time
+                            sleep_duration = max(0, img.duration - elapsed)
+                            
+                            # Additional check: don't exceed target end time
+                            time_until_target = target_end_time - time.time()
+                            if time_until_target < sleep_duration:
+                                sleep_duration = max(0, time_until_target)
+                            
+                            if upload_time > 0.01:  # Only log significant upload times (>10ms)
+                                self.log_progress(f"  Upload: {upload_time*1000:.1f}ms, Adjusted sleep: {sleep_duration:.3f}s")
+                        else:
+                            # Precise pulse time: maintain exact image duration regardless of upload time
+                            sleep_duration = img.duration
+                        
+                        # Sleep for the calculated projection duration
+                        time.sleep(sleep_duration)
+                        # Don't stop sequence here - let it continue until next image or end of all cycles
                     
                     # Note: LEDs will be turned off at the start of the next image loop
                     # or at the end of all cycles (see below)
@@ -1745,6 +2457,10 @@ class DMDControllerGUI:
                     remaining = (cycles - c) * cycle_dur
                     self.log_progress(f"Progress: {c}/{cycles} cycles ({c/cycles*100:.1f}%) | Elapsed: {elapsed/60:.1f}min | Remaining: ~{remaining/60:.1f}min")
             
+            # Stop DMD sequence after all cycles complete
+            if not self.demo_mode:
+                self.dlp.stopsequence()
+            
             # Ensure all LEDs are off at the end
             if self.coolled_connected:
                 if not self.coolled_demo_mode:
@@ -1753,11 +2469,32 @@ class DMDControllerGUI:
                 else:
                     self.log_progress("[DEMO] LED: All channels OFF")
             
+            # Report timing accuracy
+            actual_runtime = time.time() - start_time
+            expected_runtime = runtime_sec
+            timing_error = actual_runtime - expected_runtime
+            timing_error_pct = (timing_error / expected_runtime) * 100 if expected_runtime > 0 else 0
+            
+            self.log_progress(f"Timing Report:")
+            self.log_progress(f"  Expected: {expected_runtime/60:.2f}min ({expected_runtime:.1f}s)")
+            self.log_progress(f"  Actual: {actual_runtime/60:.2f}min ({actual_runtime:.1f}s)")
+            self.log_progress(f"  Error: {timing_error:+.2f}s ({timing_error_pct:+.2f}%)")
+            if timing_mode == "precise_total" and abs(timing_error_pct) < 1.0:
+                self.log_progress(f"  ✓ Timing accuracy: Excellent (<1% error)")
+            elif timing_mode == "precise_pulse":
+                self.log_progress(f"  Note: Expected drift in precise pulse mode")
+            
             self.log_progress("Pulsed projection completed!" if not self.demo_mode else "[DEMO] Pulsed projection simulation completed!")
             self.root.after(0, self.stop_projection)
             
         except Exception as e:
             self.log_progress(f"Error: {e}")
+            # Stop DMD sequence on error
+            if not self.demo_mode and self.dlp:
+                try:
+                    self.dlp.stopsequence()
+                except:
+                    pass
             # Ensure LEDs are off on error
             if self.coolled_connected:
                 try:
@@ -1769,6 +2506,248 @@ class DMDControllerGUI:
                 except:
                     pass
             self.root.after(0, self.stop_projection)
+    
+    def run_nikon_trigger(self):
+        """Nikon NIS Trigger mode: File-based synchronization"""
+        try:
+            self.log_progress("Nikon NIS Trigger mode started")
+            self.log_progress(f"Monitoring: {self.settings['trigger_on_off_path']}")
+            self.log_progress(f"           {self.settings['trigger_next_path']}")
+            self.log_progress("Waiting for trigger files...")
+            
+            # Initialize tracking variables
+            last_on_off_value = 0
+            last_next_value = 0
+            current_pattern_index = 0
+            is_projecting = False
+            
+            # File paths from settings
+            on_off_path = self.settings['trigger_on_off_path']
+            next_path = self.settings['trigger_next_path']
+            
+            # Monitoring loop
+            while not self.stop_projection_flag:
+                try:
+                    # Read trigger_on_off.txt
+                    try:
+                        with open(on_off_path, 'r') as f:
+                            on_off_value = int(f.read().strip())
+                    except:
+                        on_off_value = 0
+                    
+                    # Read trigger_next.txt
+                    try:
+                        with open(next_path, 'r') as f:
+                            next_value = int(f.read().strip())
+                    except:
+                        next_value = 0
+                    
+                    # Update status display
+                    self.root.after(0, lambda: self.nikon_on_off_status.config(
+                        text=str(on_off_value), 
+                        foreground='green' if on_off_value == 1 else 'red'
+                    ))
+                    self.root.after(0, lambda nv=next_value: self.nikon_next_status.config(text=str(nv)))
+                    
+                    # Check for ON/OFF state change
+                    if on_off_value != last_on_off_value:
+                        if on_off_value == 1 and not is_projecting:
+                            # Start projection
+                            self.log_progress(f"✓ Trigger ON detected (value={on_off_value})")
+                            is_projecting = True
+                            last_next_value = next_value
+                            
+                            # Check if we should start with black frame
+                            if self.nikon_black_frame_var.get():
+                                # Project black frame initially
+                                self.log_progress("  Starting with black frame (prevents double-trigger)")
+                                current_pattern_index = -1  # Special value for black frame
+                                self._project_black_frame_nikon_trigger()
+                            else:
+                                # Project first pattern immediately
+                                current_pattern_index = 0
+                                self._project_single_pattern_nikon_trigger(current_pattern_index)
+                            
+                        elif on_off_value == 0 and is_projecting:
+                            # Stop projection
+                            self.log_progress(f"✓ Trigger OFF detected (value={on_off_value})")
+                            is_projecting = False
+                            if not self.demo_mode:
+                                self.dlp.stopsequence()
+                            self.log_progress("Projection stopped, waiting for next trigger...")
+                        
+                        last_on_off_value = on_off_value
+                    
+                    # Check for NEXT increment (only when projecting)
+                    if is_projecting and next_value != last_next_value:
+                        self.log_progress(f"✓ NEXT increment detected ({last_next_value} → {next_value})")
+                        last_next_value = next_value
+                        
+                        # Advance to next pattern
+                        current_pattern_index += 1
+                        if current_pattern_index >= len(self.images):
+                            current_pattern_index = 0  # Wrap around
+                            self.log_progress("  Wrapped to first pattern")
+                        
+                        # Project next pattern
+                        self._project_single_pattern_nikon_trigger(current_pattern_index)
+                    
+                    # Small delay to avoid excessive file reading
+                    time.sleep(0.1)  # Check every 100ms
+                    
+                except Exception as e:
+                    self.log_progress(f"Warning: Error reading trigger files: {e}")
+                    time.sleep(0.5)  # Longer delay on error
+            
+            # Cleanup when stopped
+            if not self.demo_mode:
+                self.dlp.stopsequence()
+            self.log_progress("Nikon NIS Trigger mode stopped")
+            self.root.after(0, self.stop_projection)
+            
+        except Exception as e:
+            self.log_progress(f"Error in Nikon trigger mode: {e}")
+            self.root.after(0, self.stop_projection)
+    
+    def _project_single_pattern_nikon_trigger(self, pattern_index):
+        """Project a single pattern in Nikon trigger mode"""
+        try:
+            img = self.images[pattern_index]
+            filename = os.path.basename(img.filepath)
+            
+            # Update status display
+            self.root.after(0, lambda: self.nikon_current_pattern.config(
+                text=f"{pattern_index + 1}/{len(self.images)}: {filename}"
+            ))
+            
+            # Update preview
+            self.update_preview_during_projection(img, f"Pattern {pattern_index + 1}/{len(self.images)}")
+            
+            self.log_progress(f"  Projecting pattern {pattern_index + 1}/{len(self.images)}: {filename} ({img.mode})")
+            
+            if self.demo_mode:
+                # Demo mode
+                self.log_progress(f"  [DEMO] Would project {filename}")
+                
+                # Demo CoolLED control
+                if img.led_enabled and self.coolled_connected:
+                    enabled_channels = [ch for ch in ['A', 'B', 'C', 'D'] if img.led_channels[ch]['enabled']]
+                    if enabled_channels:
+                        for channel in enabled_channels:
+                            wavelength = img.led_channels[channel]['wavelength']
+                            intensity = img.led_channels[channel]['intensity']
+                            self.log_progress(f"  [DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}%")
+                elif img.led_enabled:
+                    self.log_progress(f"  ⚠ LED enabled but not connected")
+            else:
+                # Real hardware mode - stop current, switch LED, upload new pattern, start
+                
+                # CRITICAL: Stop DMD first to create dark period
+                self.dlp.stopsequence()
+                
+                # Turn off ALL CoolLED channels first (clean slate)
+                if self.coolled_connected:
+                    try:
+                        if not self.coolled_demo_mode:
+                            self.coolled.all_off()
+                        # Don't log "all off" to reduce clutter
+                    except Exception as e:
+                        self.log_progress(f"  Warning: Could not turn off LED: {e}")
+                
+                # Control CoolLED for this pattern
+                if img.led_enabled and self.coolled_connected:
+                    try:
+                        enabled_channels = [ch for ch in ['A', 'B', 'C', 'D'] if img.led_channels[ch]['enabled']]
+                        if enabled_channels:
+                            for channel in enabled_channels:
+                                wavelength = img.led_channels[channel]['wavelength']
+                                intensity = img.led_channels[channel]['intensity']
+                                
+                                if not self.coolled_demo_mode:
+                                    self.coolled.load_wavelength(wavelength)
+                                    time.sleep(0.6)  # Wait for filter wheel rotation
+                                    self.coolled.set_intensity(channel, intensity)
+                                    time.sleep(0.05)  # Wait for channel activation
+                                    self.log_progress(f"  LED: Ch{channel} {wavelength}nm @ {intensity}%")
+                                else:
+                                    self.log_progress(f"  [DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}%")
+                        else:
+                            self.log_progress(f"  LED: Enabled but no channels selected")
+                    except Exception as e:
+                        self.log_progress(f"  Warning: LED control failed: {e}")
+                elif img.led_enabled and not self.coolled_connected:
+                    self.log_progress(f"  ⚠ Warning: LED enabled but not connected")
+                
+                # Load image if needed
+                if img.image_array is None:
+                    img.load_image()
+                
+                # Upload single pattern with infinite repeat (like constant mode)
+                image_arrays = [img.image_array]
+                exposures = [img.exposure]
+                dark_times = [img.dark_time]
+                rep = 0xFFFFFFFF  # Infinite repeat - pattern stays on screen
+                
+                if img.mode == '1bit':
+                    self.dlp.defsequence(image_arrays, exposures, [False], dark_times, [1], rep,
+                                       progress_callback=None)  # No progress for single image
+                else:  # 8-bit mode
+                    self.dlp.defsequence_8bit(image_arrays, exposures, [False], dark_times, [1], rep,
+                                            progress_callback=None)
+                
+                # Start projection (LED already set, so transition is invisible)
+                self.dlp.startsequence()
+                self.log_progress(f"  ✓ Pattern started ({img.mode}, {img.exposure}μs)")
+                
+        except Exception as e:
+            self.log_progress(f"  Error projecting pattern: {e}")
+    
+    def _project_black_frame_nikon_trigger(self):
+        """Project a black frame in Nikon trigger mode"""
+        try:
+            # Update status display
+            self.root.after(0, lambda: self.nikon_current_pattern.config(
+                text="BLACK FRAME (initial)"
+            ))
+            
+            self.log_progress("  Projecting BLACK FRAME (1920x1080 all zeros)")
+            
+            if self.demo_mode:
+                # Demo mode
+                self.log_progress(f"  [DEMO] Would project black frame")
+            else:
+                # Real hardware mode - project all-black pattern
+                
+                # Stop current sequence
+                self.dlp.stopsequence()
+                
+                # Turn off ALL CoolLED channels
+                if self.coolled_connected:
+                    try:
+                        if not self.coolled_demo_mode:
+                            self.coolled.all_off()
+                    except Exception as e:
+                        self.log_progress(f"  Warning: Could not turn off LED: {e}")
+                
+                # Create black frame (1920x1080 all zeros)
+                import numpy as np
+                black_frame = np.zeros((1080, 1920), dtype=np.uint8)
+                
+                # Upload as 1-bit pattern (most efficient)
+                image_arrays = [black_frame]
+                exposures = [100000]  # 100ms exposure (doesn't matter, it's black)
+                dark_times = [0]
+                rep = 0xFFFFFFFF  # Infinite repeat
+                
+                self.dlp.defsequence(image_arrays, exposures, [False], dark_times, [1], rep,
+                                   progress_callback=None)
+                
+                # Start projection
+                self.dlp.startsequence()
+                self.log_progress(f"  ✓ Black frame started")
+                
+        except Exception as e:
+            self.log_progress(f"  Error projecting black frame: {e}")
 
 def main():
     # Use ThemedTk with arc theme for modern appearance

@@ -4,19 +4,20 @@ This guide shows you how to create a desktop icon and pin the CoolCrafter GUI ap
 
 **Available Applications:**
 - `CoolCrafter_gui.py` - Main app (synchronized DMD + LED control)
-- `Pycrafter6500_gui.py` - DMD standalone control
 - `CoolLED_gui.py` - LED standalone control
+- `launcher.py` - Application launcher with GitHub link
 
 ## Quick Launch Options
 
-### Option 1: Double-Click Launchers (Included)
+### Option 1: Use the Launcher (Recommended)
 
-Two launcher files are provided for convenience:
+A launcher application is provided to easily access all features:
 
-- **`launch_gui.bat`** - Shows a console window (useful for debugging)
-- **`launch_gui.vbs`** - Runs silently without console window (recommended)
+- **`launcher.py`** - Main launcher with GUI interface
+- **`launch_gui.bat`** - Console launcher (shows debug output)
+- **`launch_gui.vbs`** - Silent launcher (no console window)
 
-Simply double-click either file to launch the GUI!
+Simply double-click any of these files to start the launcher and choose your application.
 
 ---
 
@@ -36,8 +37,3 @@ Simply double-click either file to launch the GUI!
 4. Optionally rename: `CoolCrafter` (or `DMD Controller`, `LED Controller` for standalone apps)
 5. Click **OK**
 
-### Step 3: Pin to Taskbar
-
-1. Right-click the desktop shortcut
-2. Select **"Pin to taskbar"**
-3. Done! Now you can launch with one click from the taskbar
