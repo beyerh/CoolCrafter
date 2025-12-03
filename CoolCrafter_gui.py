@@ -1810,12 +1810,13 @@ class DMDControllerGUI:
         # Use infinite repeat for constant mode
         rep = 0xFFFFFFFF
         
+        # No progress callback for single image - faster upload
         if img.mode == '1bit':
             self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
-                               progress_callback=self.log_progress)
+                               progress_callback=None)
         else:
             self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
-                                     progress_callback=self.log_progress)
+                                     progress_callback=None)
     
     def _upload_complete(self, mode):
         """Called when upload completes successfully"""
@@ -2104,14 +2105,16 @@ class DMDControllerGUI:
                     
                     max_1bit = self.settings['max_patterns_1bit']
                     max_8bit = self.settings['max_patterns_8bit']
+                    # No progress for single image in pulsed mode - faster upload
+                    callback = None if len(self.images) == 1 else self.log_progress
                     if sequence_mode == '1bit':
                         self.log_progress(f"Using 1-bit sequence mode (max {max_1bit} patterns)")
                         self.dlp.defsequence(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep,
-                                           progress_callback=self.log_progress)
+                                           progress_callback=callback)
                     else:  # 8-bit mode
                         self.log_progress(f"Using 8-bit sequence mode (max {max_8bit} patterns)")
                         self.dlp.defsequence_8bit(image_arrays, exposures, [False]*len(self.images), dark_times, [1]*len(self.images), rep,
-                                                 progress_callback=self.log_progress)
+                                                 progress_callback=callback)
                 
                 # Start sequence (either new or pre-uploaded)
                 self.dlp.startsequence()
@@ -2241,13 +2244,13 @@ class DMDControllerGUI:
                     rep = 0xFFFFFFFF
                     
                     if img.mode == '1bit':
-                        # Project single 1-bit image
+                        # Project single 1-bit image - no progress callback for faster upload
                         self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
-                                           progress_callback=self.log_progress)
+                                           progress_callback=None)
                     else:
-                        # Project single 8-bit image
+                        # Project single 8-bit image - no progress callback for faster upload
                         self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], rep,
-                                                 progress_callback=self.log_progress)
+                                                 progress_callback=None)
                 
                 # Start sequence (either new or pre-uploaded)
                 self.dlp.startsequence()
@@ -2395,12 +2398,13 @@ class DMDControllerGUI:
                         
                         # Step 3: Upload new DMD pattern (this takes time, especially for 8-bit)
                         upload_start = time.time()
+                        # No progress callback for single image - faster upload in pulsed mode
                         if img.mode == '1bit':
                             self.dlp.defsequence([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0xFFFFFFFF,
-                                               progress_callback=self.log_progress)
+                                               progress_callback=None)
                         else:
                             self.dlp.defsequence_8bit([img.image_array], [img.exposure], [False], [img.dark_time], [1], 0xFFFFFFFF,
-                                                     progress_callback=self.log_progress)
+                                                     progress_callback=None)
                         upload_time = time.time() - upload_start
                         
                         # Step 4: Configure and turn on the target LED channels (still in dark period)
