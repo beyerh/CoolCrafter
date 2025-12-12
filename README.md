@@ -22,7 +22,7 @@ Two main applications for different use cases:
 - Nikon NIS Trigger mode for synchronized time-lapse experiments with Nikon NIS software
 - **Use this for synchronized optogenetic stimulation**
 
-### 💡 **CoolLED_gui.py** (LED Standalone)
+### **CoolLED_gui.py** (LED Standalone)
 **CoolLED pE-4000 control** for LED illumination without DMD.
 - Independent 4-channel control (A, B, C, D)
 - Wavelength selection per channel:
