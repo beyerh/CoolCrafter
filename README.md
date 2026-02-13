@@ -1,13 +1,13 @@
 # CoolCrafter - Synchronized DMD & LED Control for Optogenetics
 
-**Designed for [uPatternScope](https://github.com/santkumar/uPatternScope)** - an optogenetic microscopy platform for spatiotemporal illumination control.
+**Designed for [uPatternScope](https://github.com/santkumar/uPatternScope)** - an optogenetic microscopy platform for spatiotemporal illumination control combined with CoolLED pE-4000 LED illumination.
 
 Integrated control system for the **TI DLP LightCrafter 6500** (DMD) and **CoolLED pE-4000** (LED illumination). Provides synchronized projection and LED control for optogenetic experiments with precise spatial and temporal control. Implemented with Claude Sonnet 4.5.
 
 **Built on:**
-- [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) - DMD control foundation
-- [uPatternScope](https://github.com/santkumar/uPatternScope) - 8-bit grayscale support and optogenetic workflows
-- [CoolLED_control](https://github.com/philglock/CoolLED_control) - LED integration
+- [Pycrafter6500](https://github.com/csi-dcsc/Pycrafter6500) - Python DMD control foundation
+- [uPatternScope](https://github.com/santkumar/uPatternScope) - Mathlab uPatternScope 8-bit grayscale support and optogenetic workflows
+- [CoolLED_control](https://github.com/philglock/CoolLED_control) - CoolLED pE-4000 LED integration
 
 ## Applications
 
@@ -76,7 +76,7 @@ python CoolCrafter_gui.py
 python CoolLED_gui.py
 ```
 
-**Windows Users**: Double-click `launch_gui.bat` or `launch_gui.vbs` to start the launcher. See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for creating desktop shortcuts and taskbar pinning.
+**Windows Users**: Double-click `launch_gui.bat` or `launch_gui.vbs` to start the launcher. See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for creating desktop shortcuts.
 
 ## Key Features
 
@@ -86,7 +86,7 @@ python CoolLED_gui.py
 - Flexible timing: per-image exposure, dark time, duration
 - Four projection modes: Sequence, Constant, Pulsed, Nikon NIS Trigger
 - Real-time upload progress feedback for large sequences
-- File-based synchronization with Nikon NIS for time-lapse experiments
+- File- and Macro-based synchronization with Nikon NIS for time-lapse experiments
 
 **CoolLED Integration:**
 - 4 independent channels (A, B, C, D)
@@ -226,14 +226,6 @@ python determine_max_exposure.py
 ```
 
 **See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for detailed testing instructions, troubleshooting, and configuration examples.**
-
-
-
-## Version History
-
-See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
-
-**Latest (v0.2):** Fixed critical upload bug, increased pattern limits (400×1-bit, 25×8-bit), added real-time progress feedback, Nikon NIS Trigger mode.
 
 ## Credits
 

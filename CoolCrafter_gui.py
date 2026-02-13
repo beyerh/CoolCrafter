@@ -36,6 +36,7 @@ class CoolLEDController:
             for baud in [57600, 38400]:
                 try:
                     self.serial = serial.Serial(self.port, baud, timeout=1.0)
+                    # Use time.sleep here as this is initialization, not interruptible by stop flag
                     time.sleep(0.2)
                     
                     # Clear any buffered data
@@ -74,6 +75,7 @@ class CoolLEDController:
             return None
         try:
             self.serial.write(f"{command}\r".encode('utf-8'))
+            # Short sleep for serial communication stability - not interruptible
             time.sleep(0.05)
             response = self.serial.readline().decode('utf-8').strip()
             return response
@@ -471,6 +473,17 @@ class DMDControllerGUI:
         except Exception as e:
             print(f"Could not save settings: {e}")
     
+    def _interruptable_sleep(self, duration_sec, interval=0.1):
+        """Sleep for a duration, but check stop_projection_flag every interval."""
+        start_sleep_time = time.time()
+        while time.time() - start_sleep_time < duration_sec:
+            if self.stop_projection_flag:
+                return True  # Interrupted
+            remaining_time = duration_sec - (time.time() - start_sleep_time)
+            if remaining_time <= 0: break
+            time.sleep(min(remaining_time, interval))
+        return False # Not interrupted
+
     def _save_black_frame_setting(self):
         """Save black frame setting when checkbox is toggled"""
         self.settings['nikon_start_black_frame'] = self.nikon_black_frame_var.get()
@@ -1869,6 +1882,13 @@ class DMDControllerGUI:
         if not self.images:
             messagebox.showerror("Error", "No images")
             return
+
+        # Thread Guard: Prevent multiple projection threads from running simultaneously
+        if self.projection_thread and self.projection_thread.is_alive():
+            self.log_progress("Warning: A projection thread is already running. Please stop it before starting a new one.")
+            # Ensure UI reflects the active state if it got out of sync
+            self.update_button_states()
+            return
         
         # Check if images need to be uploaded first (for sequence/constant modes)
         mode = self.projection_mode.get()
@@ -1973,6 +1993,9 @@ class DMDControllerGUI:
             self.timer_update_id = None
         self.timer_label.config(text="")
         
+        # Clear the projection thread reference
+        self.projection_thread = None
+
         # Restore upload status if images are still uploaded
         if self.images_uploaded:
             mode = self.projection_mode.get()
@@ -2066,9 +2089,9 @@ class DMDControllerGUI:
                             
                             if not self.coolled_demo_mode:
                                 self.coolled.load_wavelength(wavelength)
-                                time.sleep(0.6)  # Wait for mechanical filter wheel rotation (0.6 sec for troubleshooting)
+                                if self._interruptable_sleep(0.6): return  # Wait for mechanical filter wheel rotation (0.6 sec for troubleshooting)
                                 self.coolled.set_intensity(channel, intensity)
-                                time.sleep(0.05)  # Wait for channel to activate
+                                if self._interruptable_sleep(0.05): return  # Wait for channel to activate
                                 self.log_progress(f"LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
                             else:
                                 self.log_progress(f"[DEMO] LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
@@ -2142,7 +2165,7 @@ class DMDControllerGUI:
                 
                 # Calculate time to display based on exposure + dark time (in seconds)
                 display_time = (img.exposure + img.dark_time) / 1000000.0  # Convert μs to seconds
-                time.sleep(display_time)
+                if self._interruptable_sleep(display_time): return
                 idx += 1
                 
         except Exception as e:
@@ -2289,7 +2312,10 @@ class DMDControllerGUI:
             cycle_dur = sum(i.duration for i in self.images)
             cycles = int(runtime_sec / cycle_dur) if cycle_dur > 0 else 1
             
-            self.log_progress("Starting pulsed projection..." if not self.demo_mode else "[DEMO] Starting pulsed projection simulation...")
+            if not self.demo_mode:
+                self.log_progress("Starting pulsed projection...")
+            else:
+                self.log_progress("[DEMO] Starting pulsed projection simulation...")
             
             # Pre-load all images to minimize delays during transitions
             if not self.demo_mode:
@@ -2364,7 +2390,7 @@ class DMDControllerGUI:
                             self.log_progress(f"  ⚠ LED enabled but not connected")
                         
                         self.log_progress(f"[DEMO] Projecting {filename} ({img.mode}) for {img.duration}s...")
-                        time.sleep(img.duration)  # Use full duration in demo mode
+                        if self._interruptable_sleep(img.duration): return # Use interruptable sleep
                     else:
                         # Real hardware mode
                         self.log_progress(f"Projecting {filename} ({img.mode}) for {img.duration}s...")
@@ -2388,13 +2414,13 @@ class DMDControllerGUI:
                         # Step 1: Stop current DMD sequence (screen goes dark instantly)
                         # This hides any sequential LED switching
                         self.dlp.stopsequence()
-                        time.sleep(0.02)
+                        if self._interruptable_sleep(0.02): return
                         
                         # Step 2: Turn off all LED channels (now invisible because DMD is dark)
                         if self.coolled_connected:
                             for ch in ['A', 'B', 'C', 'D']:
                                 self.coolled.send_command(f"CSS{ch}SN000")
-                            time.sleep(0.1)  # Wait for all turn-off commands to complete
+                            if self._interruptable_sleep(0.1): return  # Wait for all turn-off commands to complete
                         
                         # Step 3: Upload new DMD pattern (this takes time, especially for 8-bit)
                         upload_start = time.time()
@@ -2416,12 +2442,12 @@ class DMDControllerGUI:
                                 # Load wavelength for this specific channel
                                 # This triggers mechanical filter wheel rotation - needs significant time!
                                 self.coolled.send_command(f"LOAD:{wavelength}")
-                                time.sleep(0.6)  # 0.6 sec for mechanical wheel rotation
+                                if self._interruptable_sleep(0.6): return  # 0.6 sec for mechanical wheel rotation
                                 
                                 # Set intensity to turn on the channel
                                 cmd = f"CSS{channel}SN{int(intensity):03d}"
                                 self.coolled.send_command(cmd)
-                                time.sleep(0.05)  # Wait for activation
+                                if self._interruptable_sleep(0.05): return  # Wait for activation
                                 
                                 self.log_progress(f"  LED: Ch{channel} {wavelength}nm @ {intensity}% - ON")
                         elif img.led_enabled and not self.coolled_connected:
@@ -2449,7 +2475,7 @@ class DMDControllerGUI:
                             sleep_duration = img.duration
                         
                         # Sleep for the calculated projection duration
-                        time.sleep(sleep_duration)
+                        if self._interruptable_sleep(sleep_duration): return
                         # Don't stop sequence here - let it continue until next image or end of all cycles
                     
                     # Note: LEDs will be turned off at the start of the next image loop
@@ -2504,9 +2530,9 @@ class DMDControllerGUI:
                 try:
                     if not self.coolled_demo_mode:
                         self.coolled.all_off()
-                        self.log_progress("LED: All channels OFF (error cleanup)")
+                        # Reduced logging on error cleanup to prevent confusion
                     else:
-                        self.log_progress("[DEMO] LED: All channels OFF (error cleanup)")
+                        pass
                 except:
                     pass
             self.root.after(0, self.stop_projection)
